@@ -1,5 +1,6 @@
 import os
 import asyncio
+import asyncpg
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
@@ -11,10 +12,13 @@ from aiogram.webhook.aiohttp_server import (
 )
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+WEBHOOK_BASE_URL = os.environ["WEBHOOK_BASE_URL"].rstrip("/")
 WEBHOOK_PATH = "/telegram-webhook"
+
 WEB_SERVER_HOST = "0.0.0.0"
 WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
+
+db_pool = None
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -29,20 +33,42 @@ async def start_handler(message: Message):
 
 
 async def on_startup(app: web.Application):
-    if WEBHOOK_BASE_URL:
-        await bot.set_webhook(
-            url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
-        )
+    global db_pool
+
+    db_pool = await asyncpg.create_pool(
+        host=os.environ["PGHOST"],
+        database=os.environ["PGDATABASE"],
+        user=os.environ["PGUSER"],
+        password=os.environ["PGPASSWORD"],
+        ssl="require",
+        min_size=1,
+        max_size=3,
+    )
+
+    async with db_pool.acquire() as connection:
+        result = await connection.fetchval("SELECT 1")
+
+    print(f"Database connection successful: {result}")
+
+    await bot.set_webhook(
+        url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
+    )
 
 
 async def on_shutdown(app: web.Application):
+    if db_pool:
+        await db_pool.close()
+
     await bot.session.close()
 
 
 async def main():
     app = web.Application()
 
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
+    app.router.add_get(
+        "/",
+        lambda request: web.Response(text="Bot is running")
+    )
 
     SimpleRequestHandler(
         dispatcher=dp,
@@ -62,8 +88,8 @@ async def main():
         WEB_SERVER_HOST,
         WEB_SERVER_PORT,
     )
-    await site.start()
 
+    await site.start()
     print("Webhook server is running")
 
     await asyncio.Event().wait()
