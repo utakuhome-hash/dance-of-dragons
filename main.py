@@ -33,7 +33,7 @@ async def start_handler(message: Message):
 
 
 async def on_startup(app: web.Application):
-    print("STARTUP: on_startup has started")
+    print("STARTUP: on_startup has started", flush=True)
     global db_pool
 
     db_pool = await asyncpg.create_pool(
