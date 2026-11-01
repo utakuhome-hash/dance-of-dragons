@@ -1223,6 +1223,16 @@ async def on_cleanup(app):
         logger.info("Database pool closed")
 
 
+async def index_handler(request):
+    if not WEBAPP_FILE.exists():
+        return web.Response(
+            text="index.html not found",
+            status=404
+        )
+
+    return web.FileResponse(WEBAPP_FILE)
+
+
 def create_app():
     app = web.Application()
 
