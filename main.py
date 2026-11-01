@@ -7,7 +7,6 @@ import hmac
 import json
 import secrets
 import time
-import re
 
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -45,10 +44,44 @@ WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
 BASE_DIR = Path(__file__).resolve().parent
 WEBAPP_FILE = BASE_DIR / "static" / "index.html"
 
+SUPER_ADMIN_ID = 1
+
 db_pool = None
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+ALLOWED_ROLES = {
+    "player",
+    "house_leader",
+    "treasurer",
+    "admin",
+}
+
+
+# ==========================================
+# RESPONSE HELPERS
+# ==========================================
+
+def json_error(error, status=400):
+    return web.json_response(
+        {"ok": False, "error": error},
+        status=status
+    )
+
+
+def get_bearer_token(request):
+    header = request.headers.get("Authorization", "")
+
+    if not header.startswith("Bearer "):
+        return None
+
+    token = header[7:].strip()
+
+    if not token or len(token) > 512:
+        return None
+
+    return token
 
 
 # ==========================================
@@ -61,7 +94,9 @@ def main_menu():
             [
                 InlineKeyboardButton(
                     text="🐉 ورود به مینی‌اپ",
-                    web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app")
+                    web_app=WebAppInfo(
+                        url=f"{WEBHOOK_BASE_URL}/app"
+                    )
                 )
             ],
             [
@@ -203,7 +238,12 @@ def validate_telegram_init_data(init_data: str):
 
         return telegram_id, auth_date
 
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError
+    ):
         return None
 
 
@@ -226,7 +266,12 @@ async def create_player_session(connection, player_id):
             created_at,
             expires_at
         )
-        VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days')
+        VALUES (
+            $1,
+            $2,
+            NOW(),
+            NOW() + INTERVAL '7 days'
+        )
         """,
         player_id,
         token_hash
@@ -243,44 +288,164 @@ def player_response(player, token):
             "id": player["id"],
             "username": player["username"],
             "role": player["role"],
-            "house_id": player["house_id"]
+            "house_id": player["house_id"],
+            "is_super_admin": player["is_super_admin"],
         }
     })
+
+
+# ==========================================
+# SESSION AUTHENTICATION
+# ==========================================
+
+async def get_authenticated_player(request):
+    if db_pool is None:
+        return None, json_error(
+            "database_unavailable",
+            503
+        )
+
+    token = get_bearer_token(request)
+
+    if not token:
+        return None, json_error(
+            "missing_session_token",
+            401
+        )
+
+    token_hash = hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+    try:
+        async with db_pool.acquire() as connection:
+            player = await connection.fetchrow(
+                """
+                SELECT
+                    p.id,
+                    p.username,
+                    p.role,
+                    p.house_id,
+                    p.is_active,
+                    p.is_super_admin,
+                    s.id AS session_id
+                FROM player_sessions s
+                JOIN players p ON p.id = s.player_id
+                WHERE
+                    s.session_token_hash = $1
+                    AND s.revoked_at IS NULL
+                    AND s.expires_at > NOW()
+                    AND p.is_active = TRUE
+                LIMIT 1
+                """,
+                token_hash
+            )
+
+        if not player:
+            return None, json_error(
+                "invalid_or_expired_session",
+                401
+            )
+
+        return player, None
+
+    except Exception:
+        print("Session validation failed", flush=True)
+
+        return None, json_error(
+            "authentication_failed",
+            500
+        )
+
+
+async def require_admin(request):
+    player, error = await get_authenticated_player(
+        request
+    )
+
+    if error:
+        return None, error
+
+    if player["role"] != "admin":
+        return None, json_error(
+            "admin_required",
+            403
+        )
+
+    return player, None
+
+
+async def require_super_admin(request):
+    player, error = await require_admin(request)
+
+    if error:
+        return None, error
+
+    if not player["is_super_admin"]:
+        return None, json_error(
+            "super_admin_required",
+            403
+        )
+
+    return player, None
+
+
+# ==========================================
+# ADMIN AUDIT LOG
+# ==========================================
+
+async def write_admin_log(
+    connection,
+    admin_id,
+    action,
+    target_player_id=None,
+    details=None
+):
+    await connection.execute(
+        """
+        INSERT INTO admin_audit_logs (
+            admin_id,
+            action,
+            target_player_id,
+            details,
+            created_at
+        )
+        VALUES ($1, $2, $3, $4::jsonb, NOW())
+        """,
+        admin_id,
+        action,
+        target_player_id,
+        json.dumps(details or {})
+    )
 
 
 # ==========================================
 # NORMAL TELEGRAM LOGIN
 # ==========================================
 
-async def telegram_auth_handler(request: web.Request):
+async def telegram_auth_handler(request):
     if db_pool is None:
-        return web.json_response(
-            {"ok": False, "error": "database_unavailable"},
-            status=503
+        return json_error(
+            "database_unavailable",
+            503
         )
 
     try:
         body = await request.json()
     except (ValueError, json.JSONDecodeError):
-        return web.json_response(
-            {"ok": False, "error": "invalid_request"},
-            status=400
-        )
+        return json_error("invalid_request", 400)
 
     if not isinstance(body, dict):
-        return web.json_response(
-            {"ok": False, "error": "invalid_request"},
-            status=400
-        )
+        return json_error("invalid_request", 400)
 
     auth_result = validate_telegram_init_data(
         body.get("initData", "")
     )
 
     if not auth_result:
-        return web.json_response(
-            {"ok": False, "error": "invalid_telegram_auth"},
-            status=401
+        return json_error(
+            "invalid_telegram_auth",
+            401
         )
 
     telegram_id, auth_date = auth_result
@@ -291,7 +456,13 @@ async def telegram_auth_handler(request: web.Request):
 
                 player = await connection.fetchrow(
                     """
-                    SELECT id, username, role, house_id, is_active
+                    SELECT
+                        id,
+                        username,
+                        role,
+                        house_id,
+                        is_active,
+                        is_super_admin
                     FROM players
                     WHERE telegram_id = $1
                     FOR UPDATE
@@ -300,15 +471,15 @@ async def telegram_auth_handler(request: web.Request):
                 )
 
                 if not player:
-                    return web.json_response(
-                        {"ok": False, "error": "account_not_found"},
-                        status=403
+                    return json_error(
+                        "account_not_found",
+                        403
                     )
 
                 if not player["is_active"]:
-                    return web.json_response(
-                        {"ok": False, "error": "account_disabled"},
-                        status=403
+                    return json_error(
+                        "account_disabled",
+                        403
                     )
 
                 await connection.execute(
@@ -330,9 +501,57 @@ async def telegram_auth_handler(request: web.Request):
 
     except Exception:
         print("Telegram login failed", flush=True)
-        return web.json_response(
-            {"ok": False, "error": "authentication_failed"},
-            status=500
+
+        return json_error(
+            "authentication_failed",
+            500
+        )
+
+
+# ==========================================
+# LOGOUT
+# ==========================================
+
+async def logout_handler(request):
+    if db_pool is None:
+        return json_error(
+            "database_unavailable",
+            503
+        )
+
+    token = get_bearer_token(request)
+
+    if not token:
+        return json_error(
+            "missing_session_token",
+            401
+        )
+
+    token_hash = hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+    try:
+        async with db_pool.acquire() as connection:
+            await connection.execute(
+                """
+                UPDATE player_sessions
+                SET revoked_at = NOW()
+                WHERE
+                    session_token_hash = $1
+                    AND revoked_at IS NULL
+                """,
+                token_hash
+            )
+
+        return web.json_response({"ok": True})
+
+    except Exception:
+        print("Logout failed", flush=True)
+
+        return json_error(
+            "logout_failed",
+            500
         )
 
 
@@ -340,69 +559,59 @@ async def telegram_auth_handler(request: web.Request):
 # FIRST ADMIN BOOTSTRAP
 # ==========================================
 
-async def admin_bootstrap_handler(request: web.Request):
+async def admin_bootstrap_handler(request):
     if db_pool is None:
-        return web.json_response(
-            {"ok": False, "error": "database_unavailable"},
-            status=503
+        return json_error(
+            "database_unavailable",
+            503
         )
 
     if len(ADMIN_SETUP_CODE) < 24:
-        return web.json_response(
-            {"ok": False, "error": "admin_setup_not_configured"},
-            status=503
+        return json_error(
+            "admin_setup_not_configured",
+            503
         )
 
     try:
         body = await request.json()
     except (ValueError, json.JSONDecodeError):
-        return web.json_response(
-            {"ok": False, "error": "invalid_request"},
-            status=400
-        )
+        return json_error("invalid_request", 400)
 
     if not isinstance(body, dict):
-        return web.json_response(
-            {"ok": False, "error": "invalid_request"},
-            status=400
-        )
+        return json_error("invalid_request", 400)
 
     supplied_code = body.get("setupCode", "")
     init_data = body.get("initData", "")
 
     if not isinstance(supplied_code, str):
-        return web.json_response(
-            {"ok": False, "error": "invalid_request"},
-            status=400
-        )
+        return json_error("invalid_request", 400)
 
     if not hmac.compare_digest(
         supplied_code.encode("utf-8"),
         ADMIN_SETUP_CODE.encode("utf-8")
     ):
-        return web.json_response(
-            {"ok": False, "error": "invalid_setup_code"},
-            status=403
+        return json_error(
+            "invalid_setup_code",
+            403
         )
 
-    auth_result = validate_telegram_init_data(init_data)
+    auth_result = validate_telegram_init_data(
+        init_data
+    )
 
     if not auth_result:
-        return web.json_response(
-            {"ok": False, "error": "invalid_telegram_auth"},
-            status=401
+        return json_error(
+            "invalid_telegram_auth",
+            401
         )
 
     telegram_id, auth_date = auth_result
-
-    # Username is generated from the verified Telegram ID.
     admin_username = f"admin_{telegram_id}"
 
     try:
         async with db_pool.acquire() as connection:
             async with connection.transaction():
 
-                # Serialize bootstrap attempts.
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(739201846)"
                 )
@@ -418,9 +627,9 @@ async def admin_bootstrap_handler(request: web.Request):
                 )
 
                 if existing_admin:
-                    return web.json_response(
-                        {"ok": False, "error": "admin_already_exists"},
-                        status=403
+                    return json_error(
+                        "admin_already_exists",
+                        403
                     )
 
                 existing_player = await connection.fetchrow(
@@ -433,9 +642,9 @@ async def admin_bootstrap_handler(request: web.Request):
                 )
 
                 if existing_player:
-                    return web.json_response(
-                        {"ok": False, "error": "telegram_already_registered"},
-                        status=409
+                    return json_error(
+                        "telegram_already_registered",
+                        409
                     )
 
                 player = await connection.fetchrow(
@@ -447,13 +656,28 @@ async def admin_bootstrap_handler(request: web.Request):
                         role,
                         house_id,
                         is_active,
+                        is_super_admin,
                         created_at,
                         telegram_auth_date
                     )
                     VALUES (
-                        $1, NULL, $2, 'admin', NULL, TRUE, NOW(), $3
+                        $1,
+                        NULL,
+                        $2,
+                        'admin',
+                        NULL,
+                        TRUE,
+                        TRUE,
+                        NOW(),
+                        $3
                     )
-                    RETURNING id, username, role, house_id, is_active
+                    RETURNING
+                        id,
+                        username,
+                        role,
+                        house_id,
+                        is_active,
+                        is_super_admin
                     """,
                     admin_username,
                     telegram_id,
@@ -468,136 +692,126 @@ async def admin_bootstrap_handler(request: web.Request):
         return player_response(player, token)
 
     except asyncpg.UniqueViolationError:
-        return web.json_response(
-            {"ok": False, "error": "account_conflict"},
-            status=409
+        return json_error(
+            "account_conflict",
+            409
         )
 
     except Exception:
         print("Admin bootstrap failed", flush=True)
-        return web.json_response(
-            {"ok": False, "error": "admin_setup_failed"},
-            status=500
+
+        return json_error(
+            "admin_setup_failed",
+            500
         )
 
 
 # ==========================================
-# APPLICATION STARTUP
+# CURRENT PLAYER PROFILE
 # ==========================================
 
-async def on_startup(app: web.Application):
-    global db_pool
+async def me_handler(request):
+    player, error = await get_authenticated_player(
+        request
+    )
 
-    print("STARTUP: Starting application", flush=True)
+    if error:
+        return error
 
-    if not WEBAPP_FILE.is_file():
-        raise FileNotFoundError(
-            f"Mini app file not found: {WEBAPP_FILE}"
+    return web.json_response({
+        "ok": True,
+        "player": {
+            "id": player["id"],
+            "username": player["username"],
+            "role": player["role"],
+            "house_id": player["house_id"],
+            "is_super_admin": player["is_super_admin"],
+        }
+    })
+
+
+# ==========================================
+# ADMIN: LIST PLAYERS
+# ==========================================
+
+async def admin_players_handler(request):
+    admin, error = await require_admin(request)
+
+    if error:
+        return error
+
+    try:
+        page = int(request.query.get("page", "1"))
+        limit = int(request.query.get("limit", "50"))
+    except ValueError:
+        return json_error(
+            "invalid_pagination",
+            400
         )
 
-    db_pool = await asyncpg.create_pool(
-        host=os.environ["PGHOST"],
-        database=os.environ["PGDATABASE"],
-        user=os.environ["PGUSER"],
-        password=os.environ["PGPASSWORD"],
-        ssl="require",
-        min_size=1,
-        max_size=3,
-    )
+    page = max(1, min(page, 100000))
+    limit = max(1, min(limit, 100))
+    offset = (page - 1) * limit
 
-    async with db_pool.acquire() as connection:
-        result = await connection.fetchval("SELECT 1")
+    search = request.query.get("search", "").strip()
 
-    print(f"DATABASE CHECK: {result}", flush=True)
+    if len(search) > 80:
+        return json_error(
+            "search_too_long",
+            400
+        )
 
-    await bot.set_webhook(
-        url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
-    )
+    try:
+        async with db_pool.acquire() as connection:
 
-    print("Telegram webhook configured", flush=True)
+            rows = await connection.fetch(
+                """
+                SELECT
+                    id,
+                    username,
+                    role,
+                    house_id,
+                    is_active,
+                    is_super_admin,
+                    created_at
+                FROM players
+                WHERE
+                    $1 = ''
+                    OR username ILIKE '%' || $1 || '%'
+                    OR id::text = $1
+                ORDER BY id
+                LIMIT $2 OFFSET $3
+                """,
+                search,
+                limit,
+                offset
+            )
 
+            total = await connection.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM players
+                WHERE
+                    $1 = ''
+                    OR username ILIKE '%' || $1 || '%'
+                    OR id::text = $1
+                """,
+                search
+            )
 
-# ==========================================
-# APPLICATION SHUTDOWN
-# ==========================================
-
-async def on_shutdown(app: web.Application):
-    global db_pool
-
-    if db_pool:
-        await db_pool.close()
-        db_pool = None
-
-    await bot.session.close()
-
-    print("Application shutdown complete", flush=True)
-
-
-# ==========================================
-# MAIN WEB APPLICATION
-# ==========================================
-
-async def main():
-    app = web.Application(
-        client_max_size=1024 * 1024
-    )
-
-    app.router.add_get(
-        "/",
-        lambda request: web.Response(text="Bot is running")
-    )
-
-    app.router.add_get(
-        "/app",
-        lambda request: web.FileResponse(WEBAPP_FILE)
-    )
-
-    app.router.add_post(
-        "/api/auth/telegram",
-        telegram_auth_handler
-    )
-
-    app.router.add_post(
-        "/api/admin/bootstrap",
-        admin_bootstrap_handler
-    )
-
-    SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot
-    ).register(
-        app,
-        path=WEBHOOK_PATH
-    )
-
-    setup_application(
-        app,
-        dp,
-        bot=bot
-    )
-
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    site = web.TCPSite(
-        runner,
-        WEB_SERVER_HOST,
-        WEB_SERVER_PORT
-    )
-
-    await site.start()
-
-    print(
-        f"Webhook server is running on port {WEB_SERVER_PORT}",
-        flush=True
-    )
-
-    await asyncio.Event().wait()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-    
+        return web.json_response({
+            "ok": True,
+            "players": [
+                {
+                    "id": row["id"],
+                    "username": row["username"],
+                    "role": row["role"],
+                    "house_id": row["house_id"],
+                    "is_active": row["is_active"],
+                    "is_super_admin": row["is_super_admin"],
+                    "created_at": row["created_at"].isoformat(),
+                }
+                for row in rows
+            ],
+            "page": page,
+          
