@@ -1,15 +1,14 @@
 
 import os
-import asyncio
-import asyncpg
-import hashlib
-import hmac
-import json
-import secrets
 import time
+import json
+import hmac
+import hashlib
+import secrets
+import asyncpg
 
-from pathlib import Path
 from urllib.parse import parse_qsl
+from pathlib import Path
 
 from aiohttp import web
 
@@ -58,6 +57,21 @@ ALLOWED_ROLES = {
     "admin",
 }
 
+PERMISSION_KEYS = {
+    "players": "مدیریت بازیکنان",
+    "houses": "مدیریت خاندان‌ها",
+    "territories": "مدیریت قلمروها",
+    "economy": "مدیریت اقتصاد",
+    "dragons": "مدیریت اژدهایان",
+    "characters": "مدیریت شخصیت‌ها",
+    "events": "مدیریت رویدادها",
+    "war": "مدیریت جنگ‌ها",
+    "diplomacy": "مدیریت دیپلماسی",
+    "logs": "مشاهده گزارش‌ها",
+}
+
+ACCESS_LEVELS = {"none", "view", "edit"}
+
 
 # ==========================================
 # RESPONSE HELPERS
@@ -94,9 +108,7 @@ def main_menu():
             [
                 InlineKeyboardButton(
                     text="🐉 ورود به مینی‌اپ",
-                    web_app=WebAppInfo(
-                        url=f"{WEBHOOK_BASE_URL}/app"
-                    )
+                    web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app")
                 )
             ],
             [
@@ -224,10 +236,7 @@ def validate_telegram_init_data(init_data: str):
             hashlib.sha256
         ).hexdigest()
 
-        if not hmac.compare_digest(
-            calculated_hash,
-            received_hash
-        ):
+        if not hmac.compare_digest(calculated_hash, received_hash):
             return None
 
         user_data = json.loads(data["user"])
@@ -266,12 +275,7 @@ async def create_player_session(connection, player_id):
             created_at,
             expires_at
         )
-        VALUES (
-            $1,
-            $2,
-            NOW(),
-            NOW() + INTERVAL '7 days'
-        )
+        VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days')
         """,
         player_id,
         token_hash
@@ -300,18 +304,12 @@ def player_response(player, token):
 
 async def get_authenticated_player(request):
     if db_pool is None:
-        return None, json_error(
-            "database_unavailable",
-            503
-        )
+        return None, json_error("database_unavailable", 503)
 
     token = get_bearer_token(request)
 
     if not token:
-        return None, json_error(
-            "missing_session_token",
-            401
-        )
+        return None, json_error("missing_session_token", 401)
 
     token_hash = hashlib.sha256(
         token.encode("utf-8")
@@ -342,35 +340,23 @@ async def get_authenticated_player(request):
             )
 
         if not player:
-            return None, json_error(
-                "invalid_or_expired_session",
-                401
-            )
+            return None, json_error("invalid_or_expired_session", 401)
 
         return player, None
 
     except Exception:
         print("Session validation failed", flush=True)
-
-        return None, json_error(
-            "authentication_failed",
-            500
-        )
+        return None, json_error("authentication_failed", 500)
 
 
 async def require_admin(request):
-    player, error = await get_authenticated_player(
-        request
-    )
+    player, error = await get_authenticated_player(request)
 
     if error:
         return None, error
 
     if player["role"] != "admin":
-        return None, json_error(
-            "admin_required",
-            403
-        )
+        return None, json_error("admin_required", 403)
 
     return player, None
 
@@ -381,13 +367,63 @@ async def require_super_admin(request):
     if error:
         return None, error
 
-    if not player["is_super_admin"]:
-        return None, json_error(
-            "super_admin_required",
-            403
-        )
+    # فقط شناسه 1 سوپرادمین است.
+    if (
+        player["id"] != SUPER_ADMIN_ID
+        or not player["is_super_admin"]
+    ):
+        return None, json_error("super_admin_required", 403)
 
     return player, None
+
+
+async def require_permission(request, permission_key, minimum="view"):
+    player, error = await get_authenticated_player(request)
+
+    if error:
+        return None, error
+
+    if player["role"] != "admin":
+        return None, json_error("admin_required", 403)
+
+    if permission_key not in PERMISSION_KEYS:
+        return None, json_error("invalid_permission", 400)
+
+    if minimum not in {"view", "edit"}:
+        return None, json_error("invalid_required_level", 400)
+
+    # سوپرادمین اصلی دسترسی کامل دارد.
+    if (
+        player["id"] == SUPER_ADMIN_ID
+        and player["is_super_admin"]
+    ):
+        return player, None
+
+    required_rank = {"none": 0, "view": 1, "edit": 2}
+
+    try:
+        async with db_pool.acquire() as connection:
+            granted = await connection.fetchval(
+                """
+                SELECT access_level
+                FROM admin_permissions
+                WHERE player_id = $1
+                  AND permission_key = $2
+                """,
+                player["id"],
+                permission_key
+            )
+
+        granted_rank = required_rank.get(granted, 0)
+
+        if granted_rank < required_rank[minimum]:
+            return None, json_error("permission_denied", 403)
+
+        return player, None
+
+    except Exception:
+        print("Permission check failed", flush=True)
+        return None, json_error("permission_check_failed", 500)
 
 
 # ==========================================
@@ -420,15 +456,12 @@ async def write_admin_log(
 
 
 # ==========================================
-# NORMAL TELEGRAM LOGIN
+# TELEGRAM LOGIN
 # ==========================================
 
 async def telegram_auth_handler(request):
     if db_pool is None:
-        return json_error(
-            "database_unavailable",
-            503
-        )
+        return json_error("database_unavailable", 503)
 
     try:
         body = await request.json()
@@ -443,17 +476,13 @@ async def telegram_auth_handler(request):
     )
 
     if not auth_result:
-        return json_error(
-            "invalid_telegram_auth",
-            401
-        )
+        return json_error("invalid_telegram_auth", 401)
 
     telegram_id, auth_date = auth_result
 
     try:
         async with db_pool.acquire() as connection:
             async with connection.transaction():
-
                 player = await connection.fetchrow(
                     """
                     SELECT
@@ -471,16 +500,10 @@ async def telegram_auth_handler(request):
                 )
 
                 if not player:
-                    return json_error(
-                        "account_not_found",
-                        403
-                    )
+                    return json_error("account_not_found", 403)
 
                 if not player["is_active"]:
-                    return json_error(
-                        "account_disabled",
-                        403
-                    )
+                    return json_error("account_disabled", 403)
 
                 await connection.execute(
                     """
@@ -501,11 +524,7 @@ async def telegram_auth_handler(request):
 
     except Exception:
         print("Telegram login failed", flush=True)
-
-        return json_error(
-            "authentication_failed",
-            500
-        )
+        return json_error("authentication_failed", 500)
 
 
 # ==========================================
@@ -514,18 +533,12 @@ async def telegram_auth_handler(request):
 
 async def logout_handler(request):
     if db_pool is None:
-        return json_error(
-            "database_unavailable",
-            503
-        )
+        return json_error("database_unavailable", 503)
 
     token = get_bearer_token(request)
 
     if not token:
-        return json_error(
-            "missing_session_token",
-            401
-        )
+        return json_error("missing_session_token", 401)
 
     token_hash = hashlib.sha256(
         token.encode("utf-8")
@@ -537,9 +550,8 @@ async def logout_handler(request):
                 """
                 UPDATE player_sessions
                 SET revoked_at = NOW()
-                WHERE
-                    session_token_hash = $1
-                    AND revoked_at IS NULL
+                WHERE session_token_hash = $1
+                  AND revoked_at IS NULL
                 """,
                 token_hash
             )
@@ -548,11 +560,7 @@ async def logout_handler(request):
 
     except Exception:
         print("Logout failed", flush=True)
-
-        return json_error(
-            "logout_failed",
-            500
-        )
+        return json_error("logout_failed", 500)
 
 
 # ==========================================
@@ -561,16 +569,10 @@ async def logout_handler(request):
 
 async def admin_bootstrap_handler(request):
     if db_pool is None:
-        return json_error(
-            "database_unavailable",
-            503
-        )
+        return json_error("database_unavailable", 503)
 
     if len(ADMIN_SETUP_CODE) < 24:
-        return json_error(
-            "admin_setup_not_configured",
-            503
-        )
+        return json_error("admin_setup_not_configured", 503)
 
     try:
         body = await request.json()
@@ -590,20 +592,12 @@ async def admin_bootstrap_handler(request):
         supplied_code.encode("utf-8"),
         ADMIN_SETUP_CODE.encode("utf-8")
     ):
-        return json_error(
-            "invalid_setup_code",
-            403
-        )
+        return json_error("invalid_setup_code", 403)
 
-    auth_result = validate_telegram_init_data(
-        init_data
-    )
+    auth_result = validate_telegram_init_data(init_data)
 
     if not auth_result:
-        return json_error(
-            "invalid_telegram_auth",
-            401
-        )
+        return json_error("invalid_telegram_auth", 401)
 
     telegram_id, auth_date = auth_result
     admin_username = f"admin_{telegram_id}"
@@ -611,7 +605,6 @@ async def admin_bootstrap_handler(request):
     try:
         async with db_pool.acquire() as connection:
             async with connection.transaction():
-
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(739201846)"
                 )
@@ -619,33 +612,23 @@ async def admin_bootstrap_handler(request):
                 existing_admin = await connection.fetchval(
                     """
                     SELECT EXISTS (
-                        SELECT 1
-                        FROM players
-                        WHERE role = 'admin'
+                        SELECT 1 FROM players WHERE role = 'admin'
                     )
                     """
                 )
 
                 if existing_admin:
-                    return json_error(
-                        "admin_already_exists",
-                        403
-                    )
+                    return json_error("admin_already_exists", 403)
 
                 existing_player = await connection.fetchrow(
                     """
-                    SELECT id
-                    FROM players
-                    WHERE telegram_id = $1
+                    SELECT id FROM players WHERE telegram_id = $1
                     """,
                     telegram_id
                 )
 
                 if existing_player:
-                    return json_error(
-                        "telegram_already_registered",
-                        409
-                    )
+                    return json_error("telegram_already_registered", 409)
 
                 player = await connection.fetchrow(
                     """
@@ -661,23 +644,12 @@ async def admin_bootstrap_handler(request):
                         telegram_auth_date
                     )
                     VALUES (
-                        $1,
-                        NULL,
-                        $2,
-                        'admin',
-                        NULL,
-                        TRUE,
-                        TRUE,
-                        NOW(),
-                        $3
+                        $1, NULL, $2, 'admin', NULL,
+                        TRUE, TRUE, NOW(), $3
                     )
                     RETURNING
-                        id,
-                        username,
-                        role,
-                        house_id,
-                        is_active,
-                        is_super_admin
+                        id, username, role, house_id,
+                        is_active, is_super_admin
                     """,
                     admin_username,
                     telegram_id,
@@ -692,28 +664,19 @@ async def admin_bootstrap_handler(request):
         return player_response(player, token)
 
     except asyncpg.UniqueViolationError:
-        return json_error(
-            "account_conflict",
-            409
-        )
+        return json_error("account_conflict", 409)
 
     except Exception:
         print("Admin bootstrap failed", flush=True)
-
-        return json_error(
-            "admin_setup_failed",
-            500
-        )
+        return json_error("admin_setup_failed", 500)
 
 
 # ==========================================
-# CURRENT PLAYER PROFILE
+# CURRENT PLAYER
 # ==========================================
 
 async def me_handler(request):
-    player, error = await get_authenticated_player(
-        request
-    )
+    player, error = await get_authenticated_player(request)
 
     if error:
         return error
@@ -735,7 +698,9 @@ async def me_handler(request):
 # ==========================================
 
 async def admin_players_handler(request):
-    admin, error = await require_admin(request)
+    admin, error = await require_permission(
+        request, "players", "view"
+    )
 
     if error:
         return error
@@ -744,10 +709,7 @@ async def admin_players_handler(request):
         page = int(request.query.get("page", "1"))
         limit = int(request.query.get("limit", "50"))
     except ValueError:
-        return json_error(
-            "invalid_pagination",
-            400
-        )
+        return json_error("invalid_pagination", 400)
 
     page = max(1, min(page, 100000))
     limit = max(1, min(limit, 100))
@@ -756,24 +718,15 @@ async def admin_players_handler(request):
     search = request.query.get("search", "").strip()
 
     if len(search) > 80:
-        return json_error(
-            "search_too_long",
-            400
-        )
+        return json_error("search_too_long", 400)
 
     try:
         async with db_pool.acquire() as connection:
-
             rows = await connection.fetch(
                 """
                 SELECT
-                    id,
-                    username,
-                    role,
-                    house_id,
-                    is_active,
-                    is_super_admin,
-                    created_at
+                    id, username, role, house_id,
+                    is_active, is_super_admin, created_at
                 FROM players
                 WHERE
                     $1 = ''
@@ -807,193 +760,378 @@ async def admin_players_handler(request):
                     "username": row["username"],
                     "role": row["role"],
                     "house_id": row["house_id"],
+
+                        "house_id": row["house_id"],
                     "is_active": row["is_active"],
                     "is_super_admin": row["is_super_admin"],
-                    "created_at": row["created_at"].isoformat(),
                 }
                 for row in rows
             ],
-            "page": page,
-          
-
             "total": total,
-            "pages": (total + limit - 1) // limit,
+            "page": page,
+            "per_page": limit,
         })
 
-    except Exception:
-        print("Admin players list failed", flush=True)
-        return json_error("players_list_failed", 500)
+    except Exception as e:
+        logger.exception("Admin players handler error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
 
-
-# ==========================================
-# ADMIN: CHANGE PLAYER STATUS
-# ==========================================
 
 async def admin_player_status_handler(request):
-    admin, error = await require_admin(request)
+    admin, error = await require_permission(
+        request, "players", "edit"
+    )
     if error:
         return error
 
     try:
         player_id = int(request.match_info["player_id"])
-        body = await request.json()
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return json_error("invalid_request", 400)
+        data = await request.json()
+        is_active = data.get("is_active")
 
-    if not isinstance(body, dict) or not isinstance(body.get("is_active"), bool):
-        return json_error("invalid_request", 400)
+        if not isinstance(is_active, bool):
+            return web.json_response(
+                {"ok": False, "error": "invalid_is_active"},
+                status=400
+            )
 
-    if player_id == admin["id"]:
-        return json_error("cannot_change_own_status", 403)
+        async with request.app["db"].acquire() as connection:
+            target = await connection.fetchrow(
+                """
+                SELECT id, role, is_super_admin
+                FROM players
+                WHERE id = $1
+                """,
+                player_id
+            )
 
-    try:
-        async with db_pool.acquire() as connection:
-            async with connection.transaction():
-                target = await connection.fetchrow(
-                    """
-                    SELECT id, role, is_super_admin
-                    FROM players
-                    WHERE id = $1
-                    FOR UPDATE
-                    """,
-                    player_id
+            if not target:
+                return web.json_response(
+                    {"ok": False, "error": "player_not_found"},
+                    status=404
                 )
 
-                if not target:
-                    return json_error("player_not_found", 404)
-
-                if target["role"] == "admin" or target["is_super_admin"]:
-                    if not admin["is_super_admin"]:
-                        return json_error("super_admin_required", 403)
-
-                await connection.execute(
-                    """
-                    UPDATE players
-                    SET is_active = $1
-                    WHERE id = $2
-                    """,
-                    body["is_active"],
-                    player_id
+            if target["is_super_admin"]:
+                return web.json_response(
+                    {"ok": False, "error": "cannot_change_super_admin"},
+                    status=403
                 )
 
-                await write_admin_log(
-                    connection,
-                    admin["id"],
-                    "change_player_status",
-                    player_id,
-                    {"is_active": body["is_active"]}
+            if target["role"] == "admin" and not admin["is_super_admin"]:
+                return web.json_response(
+                    {"ok": False, "error": "cannot_change_admin"},
+                    status=403
                 )
+
+            await connection.execute(
+                """
+                UPDATE players
+                SET is_active = $1
+                WHERE id = $2
+                """,
+                is_active,
+                player_id
+            )
+
+            await connection.execute(
+                """
+                INSERT INTO admin_audit_logs
+                    (admin_id, action, target_player_id, details)
+                VALUES ($1, $2, $3, $4)
+                """,
+                admin["id"],
+                "player_status_changed",
+                player_id,
+                f"is_active={is_active}"
+            )
 
         return web.json_response({"ok": True})
 
+    except (ValueError, TypeError):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
     except Exception:
-        print("Player status update failed", flush=True)
-        return json_error("status_update_failed", 500)
+        logger.exception("Admin player status handler error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
 
-
-# ==========================================
-# ADMIN: CHANGE PLAYER ROLE
-# ==========================================
 
 async def admin_player_role_handler(request):
-    admin, error = await require_admin(request)
+    admin, error = await require_super_admin(request)
     if error:
         return error
 
     try:
         player_id = int(request.match_info["player_id"])
-        body = await request.json()
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return json_error("invalid_request", 400)
+        data = await request.json()
+        role = data.get("role")
 
-    if not isinstance(body, dict):
-        return json_error("invalid_request", 400)
+        allowed_roles = {
+            "player",
+            "house_leader",
+            "treasurer",
+            "admin"
+        }
 
-    new_role = body.get("role")
+        if role not in allowed_roles:
+            return web.json_response(
+                {"ok": False, "error": "invalid_role"},
+                status=400
+            )
 
-    if new_role not in ALLOWED_ROLES:
-        return json_error("invalid_role", 400)
+        if player_id == SUPER_ADMIN_ID:
+            return web.json_response(
+                {"ok": False, "error": "cannot_change_super_admin_role"},
+                status=403
+            )
 
-    if player_id == admin["id"]:
-        return json_error("cannot_change_own_role", 403)
+        async with request.app["db"].acquire() as connection:
+            target = await connection.fetchrow(
+                "SELECT id, role FROM players WHERE id = $1",
+                player_id
+            )
 
-    try:
-        async with db_pool.acquire() as connection:
-            async with connection.transaction():
-                target = await connection.fetchrow(
-                    """
-                    SELECT id, role, is_super_admin
-                    FROM players
-                    WHERE id = $1
-                    FOR UPDATE
-                    """,
-                    player_id
+            if not target:
+                return web.json_response(
+                    {"ok": False, "error": "player_not_found"},
+                    status=404
                 )
 
-                if not target:
-                    return json_error("player_not_found", 404)
+            await connection.execute(
+                """
+                UPDATE players
+                SET role = $1
+                WHERE id = $2
+                """,
+                role,
+                player_id
+            )
 
-                if (
-                    new_role == "admin"
-                    or target["role"] == "admin"
-                    or target["is_super_admin"]
-                ):
-                    if not admin["is_super_admin"]:
-                        return json_error("super_admin_required", 403)
-
-                if target["is_super_admin"] and new_role != "admin":
-                    return json_error("cannot_demote_super_admin", 403)
-
+            if role != "admin":
                 await connection.execute(
-                    """
-                    UPDATE players
-                    SET role = $1
-                    WHERE id = $2
-                    """,
-                    new_role,
+                    "DELETE FROM admin_permissions WHERE player_id = $1",
                     player_id
                 )
 
-                await write_admin_log(
-                    connection,
-                    admin["id"],
-                    "change_player_role",
-                    player_id,
-                    {"old_role": target["role"], "new_role": new_role}
-                )
+            await connection.execute(
+                """
+                INSERT INTO admin_audit_logs
+                    (admin_id, action, target_player_id, details)
+                VALUES ($1, $2, $3, $4)
+                """,
+                admin["id"],
+                "player_role_changed",
+                player_id,
+                f"role={role}"
+            )
 
         return web.json_response({"ok": True})
 
+    except (ValueError, TypeError):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
     except Exception:
-        print("Player role update failed", flush=True)
-        return json_error("role_update_failed", 500)
+        logger.exception("Admin player role handler error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
 
 
-# ==========================================
-# ADMIN: VIEW AUDIT LOGS
-# ==========================================
-
-async def admin_logs_handler(request):
-    admin, error = await require_admin(request)
+async def admin_get_permissions_handler(request):
+    admin, error = await require_super_admin(request)
     if error:
         return error
 
     try:
-        limit = int(request.query.get("limit", "50"))
-        limit = max(1, min(limit, 100))
+        player_id = int(request.match_info["player_id"])
 
-        async with db_pool.acquire() as connection:
+        async with request.app["db"].acquire() as connection:
+            target = await connection.fetchrow(
+                "SELECT id, role FROM players WHERE id = $1",
+                player_id
+            )
+
+            if not target:
+                return web.json_response(
+                    {"ok": False, "error": "player_not_found"},
+                    status=404
+                )
+
+            if target["role"] != "admin":
+                return web.json_response(
+                    {"ok": False, "error": "target_is_not_admin"},
+                    status=400
+                )
+
+            rows = await connection.fetch(
+                """
+                SELECT permission_key, access_level
+                FROM admin_permissions
+                WHERE player_id = $1
+                ORDER BY permission_key
+                """,
+                player_id
+            )
+
+        permissions = {
+            key: "none" for key in PERMISSION_KEYS
+        }
+
+        for row in rows:
+            permissions[row["permission_key"]] = row["access_level"]
+
+        return web.json_response({
+            "ok": True,
+            "player_id": player_id,
+            "permissions": permissions
+        })
+
+    except (ValueError, TypeError):
+        return web.json_response(
+            {"ok": False, "error": "invalid_player_id"},
+            status=400
+        )
+    except Exception:
+        logger.exception("Get admin permissions error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
+
+
+async def admin_update_permissions_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        permissions = data.get("permissions")
+
+        if not isinstance(permissions, dict):
+            return web.json_response(
+                {"ok": False, "error": "invalid_permissions"},
+                status=400
+            )
+
+        invalid_keys = set(permissions.keys()) - set(PERMISSION_KEYS)
+        if invalid_keys:
+            return web.json_response(
+                {"ok": False, "error": "invalid_permission_keys"},
+                status=400
+            )
+
+        for level in permissions.values():
+            if level not in ACCESS_LEVELS:
+                return web.json_response(
+                    {"ok": False, "error": "invalid_access_level"},
+                    status=400
+                )
+
+        async with request.app["db"].acquire() as connection:
+            target = await connection.fetchrow(
+                "SELECT id, role FROM players WHERE id = $1",
+                player_id
+            )
+
+            if not target:
+                return web.json_response(
+                    {"ok": False, "error": "player_not_found"},
+                    status=404
+                )
+
+            if target["role"] != "admin" or player_id == SUPER_ADMIN_ID:
+                return web.json_response(
+                    {"ok": False, "error": "invalid_permission_target"},
+                    status=400
+                )
+
+            async with connection.transaction():
+                for key in PERMISSION_KEYS:
+                    level = permissions.get(key, "none")
+
+                    await connection.execute(
+                        """
+                        INSERT INTO admin_permissions
+                            (player_id, permission_key, access_level, granted_by)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (player_id, permission_key)
+                        DO UPDATE SET
+                            access_level = EXCLUDED.access_level,
+                            granted_by = EXCLUDED.granted_by,
+                            updated_at = NOW()
+                        """,
+                        player_id,
+                        key,
+                        level,
+                        admin["id"]
+                    )
+
+                await connection.execute(
+                    """
+                    INSERT INTO admin_audit_logs
+                        (admin_id, action, target_player_id, details)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    admin["id"],
+                    "admin_permissions_updated",
+                    player_id,
+                    "permissions updated"
+                )
+
+        return web.json_response({"ok": True})
+
+    except (ValueError, TypeError):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
+    except Exception:
+        logger.exception("Update admin permissions error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
+
+
+async def admin_logs_handler(request):
+    admin, error = await require_permission(
+        request, "logs", "view"
+    )
+    if error:
+        return error
+
+    try:
+        limit = min(
+            max(int(request.query.get("limit", "50")), 1),
+            200
+        )
+
+        async with request.app["db"].acquire() as connection:
             rows = await connection.fetch(
                 """
                 SELECT
-                    id,
-                    admin_id,
-                    action,
-                    target_player_id,
-                    details,
-                    created_at
-                FROM admin_audit_logs
-                ORDER BY id DESC
+                    l.id,
+                    l.admin_id,
+                    p.username AS admin_username,
+                    l.action,
+                    l.target_player_id,
+                    l.details,
+                    l.created_at
+                FROM admin_audit_logs l
+                LEFT JOIN players p ON p.id = l.admin_id
+                ORDER BY l.id DESC
                 LIMIT $1
                 """,
                 limit
@@ -1005,124 +1143,98 @@ async def admin_logs_handler(request):
                 {
                     "id": row["id"],
                     "admin_id": row["admin_id"],
+                    "admin_username": row["admin_username"],
                     "action": row["action"],
                     "target_player_id": row["target_player_id"],
                     "details": row["details"],
-                    "created_at": row["created_at"].isoformat(),
+                    "created_at": row["created_at"].isoformat()
+                    if row["created_at"] else None
                 }
                 for row in rows
             ]
         })
 
     except Exception:
-        print("Admin logs retrieval failed", flush=True)
-        return json_error("logs_failed", 500)
-
-
-# ==========================================
-# STARTUP AND SHUTDOWN
-# ==========================================
+        logger.exception("Admin logs handler error")
+        return web.json_response(
+            {"ok": False, "error": "internal_server_error"},
+            status=500
+        )
 
 async def on_startup(app):
-    global db_pool
+    logger.info("Starting Dance of Dragons...")
 
-    if not WEBAPP_FILE.is_file():
-        raise RuntimeError("static/index.html not found")
+    try:
+        app["db"] = await asyncpg.create_pool(DATABASE_URL)
 
-    db_pool = await asyncpg.create_pool(
-        host=os.environ["PGHOST"],
-        database=os.environ["PGDATABASE"],
-        user=os.environ["PGUSER"],
-        password=os.environ["PGPASSWORD"],
-        ssl="require",
-        min_size=1,
-        max_size=10,
-    )
+        async with app["db"].acquire() as connection:
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS admin_permissions (
+                    id BIGSERIAL PRIMARY KEY,
+                    player_id INTEGER NOT NULL
+                        REFERENCES players(id) ON DELETE CASCADE,
+                    permission_key TEXT NOT NULL,
+                    access_level TEXT NOT NULL DEFAULT 'none'
+                        CHECK (access_level IN ('none', 'view', 'edit')),
+                    granted_by INTEGER
+                        REFERENCES players(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (player_id, permission_key)
+                )
+            """)
 
-    async with db_pool.acquire() as connection:
-        await connection.execute("SELECT 1")
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_admin_permissions_player
+                ON admin_permissions(player_id)
+            """)
 
-        await connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS admin_audit_logs (
-                id BIGSERIAL PRIMARY KEY,
-                admin_id BIGINT NOT NULL REFERENCES players(id),
-                action TEXT NOT NULL,
-                target_player_id BIGINT REFERENCES players(id),
-                details JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
+            await connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_admin_permissions_key
+                ON admin_permissions(permission_key)
+            """)
 
-        await connection.execute(
-            """
-            UPDATE players
-            SET is_super_admin = TRUE
-            WHERE id = $1 AND role = 'admin'
-            """,
-            SUPER_ADMIN_ID
-        )
+            await connection.execute("""
+                UPDATE players
+                SET is_super_admin = FALSE
+                WHERE id != $1
+            """, SUPER_ADMIN_ID)
 
-    await bot.set_webhook(
-        f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
-    )
+            await connection.execute("""
+                UPDATE players
+                SET is_super_admin = TRUE
+                WHERE id = $1 AND role = 'admin'
+            """, SUPER_ADMIN_ID)
 
-    print("Database connected and webhook configured", flush=True)
+        logger.info("Database connected successfully")
 
+        if BOT_TOKEN:
+            await bot.set_webhook(WEBHOOK_URL)
+            logger.info("Telegram webhook configured")
 
-async def on_shutdown(app):
-    global db_pool
-
-    if db_pool is not None:
-        await db_pool.close()
-        db_pool = None
-
-    await bot.session.close()
-    print("Application stopped", flush=True)
+    except Exception:
+        logger.exception("Startup error")
+        raise
 
 
-# ==========================================
-# APPLICATION
-# ==========================================
+async def on_cleanup(app):
+    if "db" in app:
+        await app["db"].close()
+        logger.info("Database pool closed")
+
 
 def create_app():
     app = web.Application()
 
-    app.router.add_get(
-        "/",
-        lambda request: web.Response(text="Dance of Dragons is running.")
-    )
+    app.router.add_get("/", index_handler)
+    app.router.add_post("/webhook", webhook_handler)
 
-    app.router.add_get(
-        "/app",
-        lambda request: web.FileResponse(WEBAPP_FILE)
-    )
+    app.router.add_get("/api/me", me_handler)
 
-    app.router.add_post(
-        "/api/auth/telegram",
-        telegram_auth_handler
-    )
+    app.router.add_post("/api/auth", auth_handler)
+    app.router.add_post("/api/logout", logout_handler)
 
-    app.router.add_post(
-        "/api/admin/bootstrap",
-        admin_bootstrap_handler
-    )
-
-    app.router.add_get(
-        "/api/me",
-        me_handler
-    )
-
-    app.router.add_post(
-        "/api/logout",
-        logout_handler
-    )
-
-    app.router.add_get(
-        "/api/admin/players",
-        admin_players_handler
-    )
+    app.router.add_get("/api/admin/players", admin_players_handler)
 
     app.router.add_patch(
         "/api/admin/players/{player_id}/status",
@@ -1135,29 +1247,27 @@ def create_app():
     )
 
     app.router.add_get(
-        "/api/admin/logs",
-        admin_logs_handler
+        "/api/admin/players/{player_id}/permissions",
+        admin_get_permissions_handler
     )
 
-    SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot
-    ).register(
-        app,
-        path=WEBHOOK_PATH
+    app.router.add_put(
+        "/api/admin/players/{player_id}/permissions",
+        admin_update_permissions_handler
     )
 
-    setup_application(app, dp, bot=bot)
+    app.router.add_get("/api/admin/logs", admin_logs_handler)
 
     app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
+    app.on_cleanup.append(on_cleanup)
 
     return app
 
 
 if __name__ == "__main__":
+    app = create_app()
     web.run_app(
-        create_app(),
-        host=WEB_SERVER_HOST,
-        port=WEB_SERVER_PORT
-            )
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "10000"))
+        )
