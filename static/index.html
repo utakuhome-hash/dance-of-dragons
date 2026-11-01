@@ -160,6 +160,38 @@ nav button.active {
     text-align: center;
     padding: 15px;
     font-size: 13px;
+    line-height: 2;
+}
+
+#auth-status {
+    margin: 16px 20px 0;
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    text-align: center;
+    font-size: 12px;
+    line-height: 2;
+}
+
+#auth-status.error {
+    color: #e8a09a;
+    border-color: #713b35;
+}
+
+#auth-status.success {
+    color: #a9d6a5;
+    border-color: #426b3e;
+}
+
+#auth-status.loading {
+    color: var(--gold);
+}
+
+.player-info {
+    color: var(--gold);
+    margin-top: 5px;
+    font-weight: 700;
 }
 </style>
 </head>
@@ -185,6 +217,10 @@ nav button.active {
         <div>وضعیت</div>
         <strong>آماده‌سازی</strong>
     </div>
+</div>
+
+<div id="auth-status" class="loading">
+    در حال بررسی هویت تلگرامی...
 </div>
 
 <main>
@@ -253,16 +289,19 @@ nav button.active {
 </main>
 
 <nav>
-    <button class="active" onclick="openSection('خانه')">
+    <button class="active" onclick="openSection('خانه', this)">
         <span>🏠</span>خانه
     </button>
-    <button onclick="openSection('قلمرو من')">
+
+    <button onclick="openSection('قلمرو من', this)">
         <span>🏰</span>قلمرو
     </button>
-    <button onclick="openSection('ارتش')">
+
+    <button onclick="openSection('ارتش', this)">
         <span>⚔️</span>ارتش
     </button>
-    <button onclick="openSection('نقشه')">
+
+    <button onclick="openSection('نقشه', this)">
         <span>🗺️</span>نقشه
     </button>
 </nav>
@@ -270,17 +309,124 @@ nav button.active {
 <script>
 const tg = window.Telegram?.WebApp;
 
-if (tg) {
-    tg.ready();
-    tg.expand();
+const authStatus = document.getElementById("auth-status");
+
+function showAuthStatus(message, type = "") {
+    authStatus.className = type;
+    authStatus.textContent = message;
 }
 
-function openSection(name) {
+function openSection(name, button) {
     document.getElementById("message").textContent =
         name + " — این بخش در حال آماده‌سازی است.";
+
+    if (button) {
+        document.querySelectorAll("nav button").forEach(item => {
+            item.classList.remove("active");
+        });
+
+        button.classList.add("active");
+    }
 }
+
+async function authenticateTelegram() {
+    if (!tg) {
+        showAuthStatus(
+            "برای ورود، بازی را از طریق ربات تلگرام باز کن.",
+            "error"
+        );
+        return;
+    }
+
+    tg.ready();
+    tg.expand();
+
+    const initData = tg.initData;
+
+    if (!initData) {
+        showAuthStatus(
+            "اطلاعات احراز هویت تلگرام دریافت نشد.",
+            "error"
+        );
+        return;
+    }
+
+    showAuthStatus("در حال اتصال امن به سرور...", "loading");
+
+    try {
+        const response = await fetch("/api/auth/telegram", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                initData: initData
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.ok) {
+            if (result.error === "account_not_found") {
+                showAuthStatus(
+                    "حساب بازی برای این تلگرام ثبت نشده است. لطفاً با مدیر بازی تماس بگیر.",
+                    "error"
+                );
+            } else if (result.error === "account_disabled") {
+                showAuthStatus(
+                    "حساب بازی شما غیرفعال است.",
+                    "error"
+                );
+            } else if (result.error === "invalid_telegram_auth") {
+                showAuthStatus(
+                    "اعتبار اطلاعات تلگرام تأیید نشد. بازی را دوباره باز کن.",
+                    "error"
+                );
+            } else {
+                showAuthStatus(
+                    "ورود انجام نشد. لطفاً بعداً دوباره تلاش کن.",
+                    "error"
+                );
+            }
+
+            return;
+        }
+
+        if (!result.token || !result.player) {
+            showAuthStatus(
+                "پاسخ سرور معتبر نیست.",
+                "error"
+            );
+            return;
+        }
+
+        // Store the session token only for this browser tab.
+        sessionStorage.setItem("dod_session_token", result.token);
+
+        showAuthStatus(
+            "ورود موفقیت‌آمیز بود.",
+            "success"
+        );
+
+        const playerInfo = document.createElement("div");
+        playerInfo.className = "player-info";
+        playerInfo.textContent =
+            "بازیکن: " + result.player.username;
+
+        authStatus.appendChild(playerInfo);
+
+    } catch (error) {
+        console.error("Authentication error:", error);
+
+        showAuthStatus(
+            "ارتباط با سرور برقرار نشد. اتصال اینترنت را بررسی کن.",
+            "error"
+        );
+    }
+}
+
+authenticateTelegram();
 </script>
 
 </body>
-                                </html>
-                                
+</html>
