@@ -1,0 +1,286 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dance of Dragons</title>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;900&display=swap');
+
+:root {
+    --bg: #090909;
+    --panel: #151515;
+    --gold: #c9a44c;
+    --muted: #999;
+    --border: #302719;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: #f5f0e5;
+    font-family: 'Vazirmatn', sans-serif;
+    min-height: 100vh;
+}
+
+header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #20190f, #090909);
+}
+
+.logo {
+    font-size: 34px;
+}
+
+h1 {
+    color: var(--gold);
+    font-size: 23px;
+    margin: 8px 0;
+}
+
+.subtitle {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.season {
+    margin: 20px;
+    padding: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.season strong {
+    color: var(--gold);
+}
+
+main {
+    padding: 0 16px 100px;
+}
+
+.section-title {
+    color: var(--gold);
+    font-size: 16px;
+    margin: 24px 4px 14px;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.card:active {
+    transform: scale(0.96);
+    border-color: var(--gold);
+}
+
+.card .icon {
+    font-size: 29px;
+}
+
+.card h3 {
+    font-size: 14px;
+    margin: 10px 0 4px;
+}
+
+.card p {
+    color: var(--muted);
+    font-size: 11px;
+    margin: 0;
+}
+
+.notice {
+    margin-top: 20px;
+    padding: 15px;
+    border-right: 3px solid var(--gold);
+    background: #17130c;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #d5c7a5;
+}
+
+nav {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    background: #111;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 4px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+nav button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 11px;
+}
+
+nav button span {
+    display: block;
+    font-size: 20px;
+    margin-bottom: 3px;
+}
+
+nav button.active {
+    color: var(--gold);
+}
+
+#message {
+    color: var(--gold);
+    text-align: center;
+    padding: 15px;
+    font-size: 13px;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <div class="logo">🐉</div>
+    <h1>Dance of Dragons</h1>
+    <div class="subtitle">جنگ خاندان‌ها بر سر تاج و تخت وستروس</div>
+</header>
+
+<div class="season">
+    <div>
+        <div>سال بازی</div>
+        <strong>129 AC</strong>
+    </div>
+    <div>
+        <div>فصل</div>
+        <strong>بهار 🌸</strong>
+    </div>
+    <div>
+        <div>وضعیت</div>
+        <strong>آماده‌سازی</strong>
+    </div>
+</div>
+
+<main>
+
+    <div class="section-title">قلمرو پادشاهی</div>
+
+    <div class="grid">
+
+        <div class="card" onclick="openSection('قلمرو من')">
+            <div class="icon">🏰</div>
+            <h3>قلمرو من</h3>
+            <p>قلعه و دارایی‌ها</p>
+        </div>
+
+        <div class="card" onclick="openSection('خاندان‌ها')">
+            <div class="icon">👑</div>
+            <h3>خاندان‌ها</h3>
+            <p>قدرت و سیاست</p>
+        </div>
+
+        <div class="card" onclick="openSection('ارتش')">
+            <div class="icon">⚔️</div>
+            <h3>ارتش</h3>
+            <p>سربازان و فرماندهان</p>
+        </div>
+
+        <div class="card" onclick="openSection('اژدهای من')">
+            <div class="icon">🐉</div>
+            <h3>اژدهای من</h3>
+            <p>اژدها و سوارکار</p>
+        </div>
+
+        <div class="card" onclick="openSection('نقشه وستروس')">
+            <div class="icon">🗺️</div>
+            <h3>نقشه وستروس</h3>
+            <p>مناطق و قلعه‌ها</p>
+        </div>
+
+        <div class="card" onclick="openSection('اقتصاد')">
+            <div class="icon">💰</div>
+            <h3>اقتصاد</h3>
+            <p>خزانه و منابع</p>
+        </div>
+
+        <div class="card" onclick="openSection('پیام‌ها')">
+            <div class="icon">🕊️</div>
+            <h3>پیام‌ها</h3>
+            <p>نامه‌های کلاغی</p>
+        </div>
+
+        <div class="card" onclick="openSection('مأموریت‌ها')">
+            <div class="icon">📜</div>
+            <h3>مأموریت‌ها</h3>
+            <p>وظایف خاندان</p>
+        </div>
+
+    </div>
+
+    <div class="notice">
+        ⚜️ وستروس در آستانهٔ جنگی بزرگ قرار دارد.
+        سرنوشت هفت پادشاهی در دستان خاندان‌هاست.
+    </div>
+
+    <div id="message"></div>
+
+</main>
+
+<nav>
+    <button class="active" onclick="openSection('خانه')">
+        <span>🏠</span>خانه
+    </button>
+    <button onclick="openSection('قلمرو من')">
+        <span>🏰</span>قلمرو
+    </button>
+    <button onclick="openSection('ارتش')">
+        <span>⚔️</span>ارتش
+    </button>
+    <button onclick="openSection('نقشه')">
+        <span>🗺️</span>نقشه
+    </button>
+</nav>
+
+<script>
+const tg = window.Telegram?.WebApp;
+
+if (tg) {
+    tg.ready();
+    tg.expand();
+}
+
+function openSection(name) {
+    document.getElementById("message").textContent =
+        name + " — این بخش در حال آماده‌سازی است.";
+}
+</script>
+
+</body>
+                                </html>
+                                
