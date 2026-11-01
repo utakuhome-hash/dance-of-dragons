@@ -815,3 +815,349 @@ async def admin_players_handler(request):
             ],
             "page": page,
           
+
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        })
+
+    except Exception:
+        print("Admin players list failed", flush=True)
+        return json_error("players_list_failed", 500)
+
+
+# ==========================================
+# ADMIN: CHANGE PLAYER STATUS
+# ==========================================
+
+async def admin_player_status_handler(request):
+    admin, error = await require_admin(request)
+    if error:
+        return error
+
+    try:
+        player_id = int(request.match_info["player_id"])
+        body = await request.json()
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return json_error("invalid_request", 400)
+
+    if not isinstance(body, dict) or not isinstance(body.get("is_active"), bool):
+        return json_error("invalid_request", 400)
+
+    if player_id == admin["id"]:
+        return json_error("cannot_change_own_status", 403)
+
+    try:
+        async with db_pool.acquire() as connection:
+            async with connection.transaction():
+                target = await connection.fetchrow(
+                    """
+                    SELECT id, role, is_super_admin
+                    FROM players
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    player_id
+                )
+
+                if not target:
+                    return json_error("player_not_found", 404)
+
+                if target["role"] == "admin" or target["is_super_admin"]:
+                    if not admin["is_super_admin"]:
+                        return json_error("super_admin_required", 403)
+
+                await connection.execute(
+                    """
+                    UPDATE players
+                    SET is_active = $1
+                    WHERE id = $2
+                    """,
+                    body["is_active"],
+                    player_id
+                )
+
+                await write_admin_log(
+                    connection,
+                    admin["id"],
+                    "change_player_status",
+                    player_id,
+                    {"is_active": body["is_active"]}
+                )
+
+        return web.json_response({"ok": True})
+
+    except Exception:
+        print("Player status update failed", flush=True)
+        return json_error("status_update_failed", 500)
+
+
+# ==========================================
+# ADMIN: CHANGE PLAYER ROLE
+# ==========================================
+
+async def admin_player_role_handler(request):
+    admin, error = await require_admin(request)
+    if error:
+        return error
+
+    try:
+        player_id = int(request.match_info["player_id"])
+        body = await request.json()
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return json_error("invalid_request", 400)
+
+    if not isinstance(body, dict):
+        return json_error("invalid_request", 400)
+
+    new_role = body.get("role")
+
+    if new_role not in ALLOWED_ROLES:
+        return json_error("invalid_role", 400)
+
+    if player_id == admin["id"]:
+        return json_error("cannot_change_own_role", 403)
+
+    try:
+        async with db_pool.acquire() as connection:
+            async with connection.transaction():
+                target = await connection.fetchrow(
+                    """
+                    SELECT id, role, is_super_admin
+                    FROM players
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    player_id
+                )
+
+                if not target:
+                    return json_error("player_not_found", 404)
+
+                if (
+                    new_role == "admin"
+                    or target["role"] == "admin"
+                    or target["is_super_admin"]
+                ):
+                    if not admin["is_super_admin"]:
+                        return json_error("super_admin_required", 403)
+
+                if target["is_super_admin"] and new_role != "admin":
+                    return json_error("cannot_demote_super_admin", 403)
+
+                await connection.execute(
+                    """
+                    UPDATE players
+                    SET role = $1
+                    WHERE id = $2
+                    """,
+                    new_role,
+                    player_id
+                )
+
+                await write_admin_log(
+                    connection,
+                    admin["id"],
+                    "change_player_role",
+                    player_id,
+                    {"old_role": target["role"], "new_role": new_role}
+                )
+
+        return web.json_response({"ok": True})
+
+    except Exception:
+        print("Player role update failed", flush=True)
+        return json_error("role_update_failed", 500)
+
+
+# ==========================================
+# ADMIN: VIEW AUDIT LOGS
+# ==========================================
+
+async def admin_logs_handler(request):
+    admin, error = await require_admin(request)
+    if error:
+        return error
+
+    try:
+        limit = int(request.query.get("limit", "50"))
+        limit = max(1, min(limit, 100))
+
+        async with db_pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    id,
+                    admin_id,
+                    action,
+                    target_player_id,
+                    details,
+                    created_at
+                FROM admin_audit_logs
+                ORDER BY id DESC
+                LIMIT $1
+                """,
+                limit
+            )
+
+        return web.json_response({
+            "ok": True,
+            "logs": [
+                {
+                    "id": row["id"],
+                    "admin_id": row["admin_id"],
+                    "action": row["action"],
+                    "target_player_id": row["target_player_id"],
+                    "details": row["details"],
+                    "created_at": row["created_at"].isoformat(),
+                }
+                for row in rows
+            ]
+        })
+
+    except Exception:
+        print("Admin logs retrieval failed", flush=True)
+        return json_error("logs_failed", 500)
+
+
+# ==========================================
+# STARTUP AND SHUTDOWN
+# ==========================================
+
+async def on_startup(app):
+    global db_pool
+
+    if not WEBAPP_FILE.is_file():
+        raise RuntimeError("static/index.html not found")
+
+    db_pool = await asyncpg.create_pool(
+        host=os.environ["PGHOST"],
+        database=os.environ["PGDATABASE"],
+        user=os.environ["PGUSER"],
+        password=os.environ["PGPASSWORD"],
+        ssl="require",
+        min_size=1,
+        max_size=10,
+    )
+
+    async with db_pool.acquire() as connection:
+        await connection.execute("SELECT 1")
+
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_audit_logs (
+                id BIGSERIAL PRIMARY KEY,
+                admin_id BIGINT NOT NULL REFERENCES players(id),
+                action TEXT NOT NULL,
+                target_player_id BIGINT REFERENCES players(id),
+                details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+
+        await connection.execute(
+            """
+            UPDATE players
+            SET is_super_admin = TRUE
+            WHERE id = $1 AND role = 'admin'
+            """,
+            SUPER_ADMIN_ID
+        )
+
+    await bot.set_webhook(
+        f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
+    )
+
+    print("Database connected and webhook configured", flush=True)
+
+
+async def on_shutdown(app):
+    global db_pool
+
+    if db_pool is not None:
+        await db_pool.close()
+        db_pool = None
+
+    await bot.session.close()
+    print("Application stopped", flush=True)
+
+
+# ==========================================
+# APPLICATION
+# ==========================================
+
+def create_app():
+    app = web.Application()
+
+    app.router.add_get(
+        "/",
+        lambda request: web.Response(text="Dance of Dragons is running.")
+    )
+
+    app.router.add_get(
+        "/app",
+        lambda request: web.FileResponse(WEBAPP_FILE)
+    )
+
+    app.router.add_post(
+        "/api/auth/telegram",
+        telegram_auth_handler
+    )
+
+    app.router.add_post(
+        "/api/admin/bootstrap",
+        admin_bootstrap_handler
+    )
+
+    app.router.add_get(
+        "/api/me",
+        me_handler
+    )
+
+    app.router.add_post(
+        "/api/logout",
+        logout_handler
+    )
+
+    app.router.add_get(
+        "/api/admin/players",
+        admin_players_handler
+    )
+
+    app.router.add_patch(
+        "/api/admin/players/{player_id}/status",
+        admin_player_status_handler
+    )
+
+    app.router.add_patch(
+        "/api/admin/players/{player_id}/role",
+        admin_player_role_handler
+    )
+
+    app.router.add_get(
+        "/api/admin/logs",
+        admin_logs_handler
+    )
+
+    SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot
+    ).register(
+        app,
+        path=WEBHOOK_PATH
+    )
+
+    setup_application(app, dp, bot=bot)
+
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    return app
+
+
+if __name__ == "__main__":
+    web.run_app(
+        create_app(),
+        host=WEB_SERVER_HOST,
+        port=WEB_SERVER_PORT
+            )
