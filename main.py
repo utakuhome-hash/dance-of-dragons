@@ -342,6 +342,113 @@ async def admin_add_player_handler(request):
         return json_error("telegram_id_exists", 409)
 
 
+async def mail_players_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, username, house_id
+            FROM players
+            WHERE is_active = TRUE AND id <> $1
+            ORDER BY username, id
+            """,
+            player["id"],
+        )
+    return web.json_response({"ok": True, "players": [dict(row) for row in rows]})
+
+
+async def mail_list_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    box = request.query.get("box", "inbox")
+    if box not in ("inbox", "outbox"):
+        return json_error("invalid_mailbox")
+    column = "recipient_player_id" if box == "inbox" else "sender_player_id"
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT l.id, l.subject, l.body, l.category, l.created_at,
+                   l.read_at, p.id AS other_player_id, p.username AS other_player
+            FROM game_letters l
+            JOIN players p ON p.id = CASE WHEN $1 = 'inbox'
+                THEN l.sender_player_id ELSE l.recipient_player_id END
+            WHERE l.{column} = $2
+            ORDER BY l.created_at DESC
+            LIMIT 100
+            """,
+            box, player["id"],
+        )
+    return web.json_response({"ok": True, "letters": [dict(row) for row in rows]})
+
+
+async def mail_send_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    try:
+        data = await request.json()
+    except Exception:
+        return json_error("invalid_json")
+    try:
+        recipient_id = int(data.get("recipient_id", 0))
+    except (TypeError, ValueError):
+        return json_error("invalid_recipient")
+    subject = str(data.get("subject", "")).strip()
+    body = str(data.get("body", "")).strip()
+    category = str(data.get("category", "personal")).strip()
+    allowed = {"diplomacy", "marriage", "trade", "military", "warning", "personal"}
+    if not subject or len(subject) > 160:
+        return json_error("invalid_subject")
+    if not body or len(body) > 10000:
+        return json_error("invalid_body")
+    if category not in allowed:
+        return json_error("invalid_category")
+    if recipient_id == int(player["id"]):
+        return json_error("cannot_message_self")
+    async with request.app["db"].acquire() as conn:
+        recipient = await conn.fetchrow(
+            "SELECT id FROM players WHERE id = $1 AND is_active = TRUE",
+            recipient_id,
+        )
+        if not recipient:
+            return json_error("recipient_not_found", 404)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO game_letters
+                (sender_player_id, recipient_player_id, subject, body, category, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            RETURNING id, created_at
+            """,
+            player["id"], recipient_id, subject, body, category,
+        )
+    return web.json_response({"ok": True, "letter": dict(row)}, status=201)
+
+
+async def mail_read_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    try:
+        letter_id = int(request.match_info["letter_id"])
+    except (TypeError, ValueError):
+        return json_error("invalid_letter_id")
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE game_letters SET read_at = COALESCE(read_at, NOW())
+            WHERE id = $1 AND recipient_player_id = $2
+            RETURNING id
+            """,
+            letter_id, player["id"],
+        )
+    if not row:
+        return json_error("letter_not_found", 404)
+    return web.json_response({"ok": True})
+
+
 async def index_handler(request):
     return web.FileResponse(WEBAPP_FILE)
 
@@ -355,6 +462,21 @@ async def on_startup(app):
         ssl="require",
     )
     db_pool = app["db"]
+    async with app["db"].acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_letters (
+                id BIGSERIAL PRIMARY KEY,
+                sender_player_id BIGINT NOT NULL REFERENCES players(id),
+                recipient_player_id BIGINT NOT NULL REFERENCES players(id),
+                subject VARCHAR(160) NOT NULL,
+                body TEXT NOT NULL,
+                category VARCHAR(20) NOT NULL DEFAULT 'personal',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                read_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
     await bot.set_webhook(WEBHOOK_URL)
 
 
@@ -377,6 +499,10 @@ def create_app():
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
+    app.router.add_get("/api/mail/players", mail_players_handler)
+    app.router.add_get("/api/mail", mail_list_handler)
+    app.router.add_post("/api/mail", mail_send_handler)
+    app.router.add_post("/api/mail/{letter_id}/read", mail_read_handler)
 
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
