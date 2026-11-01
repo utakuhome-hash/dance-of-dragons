@@ -3,6 +3,8 @@ import os
 import asyncio
 import asyncpg
 
+from pathlib import Path
+from aiogram.types import WebAppInfo
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
