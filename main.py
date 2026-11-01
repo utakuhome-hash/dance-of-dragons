@@ -46,7 +46,7 @@ async def on_startup(app: web.Application):
         max_size=3,
     )
 
-        async with db_pool.acquire() as connection:
+    async with db_pool.acquire() as connection:
         result = await connection.fetchval("SELECT 1")
         print(f"DATABASE CHECK: {result}", flush=True)
 
