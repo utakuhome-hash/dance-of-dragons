@@ -2,8 +2,15 @@
 import os
 import asyncio
 import asyncpg
+import hashlib
+import hmac
+import json
+import secrets
+import time
 
 from pathlib import Path
+from urllib.parse import parse_qsl
+
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
@@ -21,11 +28,12 @@ from aiogram.webhook.aiohttp_server import (
 )
 
 
-# =========================
+# ==========================================
 # CONFIGURATION
-# =========================
+# ==========================================
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+
 WEBHOOK_BASE_URL = os.environ["WEBHOOK_BASE_URL"].rstrip("/")
 WEBHOOK_PATH = "/telegram-webhook"
 
@@ -41,9 +49,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
-# =========================
-# MAIN MENU
-# =========================
+# ==========================================
+# TELEGRAM BOT MENU
+# ==========================================
 
 def main_menu():
     return InlineKeyboardMarkup(
@@ -100,10 +108,6 @@ def main_menu():
     )
 
 
-# =========================
-# START COMMAND
-# =========================
-
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     await message.answer(
@@ -113,10 +117,6 @@ async def start_handler(message: Message):
         reply_markup=main_menu()
     )
 
-
-# =========================
-# MENU BUTTONS
-# =========================
 
 sections = {
     "my_realm": "🏰 قلمرو من",
@@ -143,9 +143,250 @@ async def menu_handler(callback: CallbackQuery):
     )
 
 
-# =========================
-# STARTUP
-# =========================
+# ==========================================
+# TELEGRAM MINI APP AUTHENTICATION
+# ==========================================
+
+def validate_telegram_init_data(init_data: str):
+    """
+    Validate Telegram Mini App initData.
+    Returns (telegram_id, auth_date) if valid.
+    Otherwise returns None.
+    """
+
+    if not init_data or not isinstance(init_data, str):
+        return None
+
+    try:
+        parsed_items = parse_qsl(
+            init_data,
+            keep_blank_values=True,
+            strict_parsing=True
+        )
+
+        # Reject duplicate fields
+        if len(dict(parsed_items)) != len(parsed_items):
+            return None
+
+        data = dict(parsed_items)
+
+        received_hash = data.pop("hash", None)
+
+        if not received_hash:
+            return None
+
+        auth_date = int(data.get("auth_date", "0"))
+        current_time = int(time.time())
+
+        # Reject future or expired authentication data
+        if auth_date > current_time + 30:
+            return None
+
+        if current_time - auth_date > 300:
+            return None
+
+        data_check_string = "\n".join(
+            f"{key}={value}"
+            for key, value in sorted(data.items())
+        )
+
+        secret_key = hmac.new(
+            b"WebAppData",
+            BOT_TOKEN.encode("utf-8"),
+            hashlib.sha256
+        ).digest()
+
+        calculated_hash = hmac.new(
+            secret_key,
+            data_check_string.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(
+            calculated_hash,
+            received_hash
+        ):
+            return None
+
+        user_json = data.get("user")
+
+        if not user_json:
+            return None
+
+        user_data = json.loads(user_json)
+
+        telegram_id = int(user_data["id"])
+
+        if telegram_id <= 0:
+            return None
+
+        return telegram_id, auth_date
+
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError
+    ):
+        return None
+
+
+async def telegram_auth_handler(request: web.Request):
+    """
+    Authenticate Telegram Mini App user
+    and create a server-side session.
+    """
+
+    if db_pool is None:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "database_unavailable"
+            },
+            status=503
+        )
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_request"
+            },
+            status=400
+        )
+
+    if not isinstance(body, dict):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_request"
+            },
+            status=400
+        )
+
+    init_data = body.get("initData", "")
+
+    auth_result = validate_telegram_init_data(init_data)
+
+    if not auth_result:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_telegram_auth"
+            },
+            status=401
+        )
+
+    telegram_id, auth_date = auth_result
+
+    try:
+        async with db_pool.acquire() as connection:
+
+            player = await connection.fetchrow(
+                """
+                SELECT
+                    id,
+                    username,
+                    role,
+                    house_id,
+                    is_active
+                FROM players
+                WHERE telegram_id = $1
+                """,
+                telegram_id
+            )
+
+            # No automatic account creation
+            if not player:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "account_not_found"
+                    },
+                    status=403
+                )
+
+            if not player["is_active"]:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "account_disabled"
+                    },
+                    status=403
+                )
+
+            # Create a random session token.
+            # Only its SHA-256 hash is stored in the database.
+            session_token = secrets.token_urlsafe(32)
+
+            session_hash = hashlib.sha256(
+                session_token.encode("utf-8")
+            ).hexdigest()
+
+            async with connection.transaction():
+
+                await connection.execute(
+                    """
+                    UPDATE players
+                    SET telegram_auth_date = $1
+                    WHERE id = $2
+                    """,
+                    auth_date,
+                    player["id"]
+                )
+
+                await connection.execute(
+                    """
+                    INSERT INTO player_sessions (
+                        player_id,
+                        session_token_hash,
+                        created_at,
+                        expires_at
+                    )
+                    VALUES (
+                        $1,
+                        $2,
+                        NOW(),
+                        NOW() + INTERVAL '7 days'
+                    )
+                    """,
+                    player["id"],
+                    session_hash
+                )
+
+        return web.json_response(
+            {
+                "ok": True,
+                "token": session_token,
+                "player": {
+                    "id": player["id"],
+                    "username": player["username"],
+                    "role": player["role"],
+                    "house_id": player["house_id"]
+                }
+            }
+        )
+
+    except Exception:
+        print(
+            "Telegram authentication database error",
+            flush=True
+        )
+
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "authentication_failed"
+            },
+            status=500
+        )
+
+
+# ==========================================
+# APPLICATION STARTUP
+# ==========================================
 
 async def on_startup(app: web.Application):
     global db_pool
@@ -176,12 +417,15 @@ async def on_startup(app: web.Application):
         url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
     )
 
-    print("Telegram webhook configured", flush=True)
+    print(
+        "Telegram webhook configured",
+        flush=True
+    )
 
 
-# =========================
-# SHUTDOWN
-# =========================
+# ==========================================
+# APPLICATION SHUTDOWN
+# ==========================================
 
 async def on_shutdown(app: web.Application):
     global db_pool
@@ -192,15 +436,20 @@ async def on_shutdown(app: web.Application):
 
     await bot.session.close()
 
-    print("Application shutdown complete", flush=True)
+    print(
+        "Application shutdown complete",
+        flush=True
+    )
 
 
-# =========================
-# WEB SERVER
-# =========================
+# ==========================================
+# MAIN WEB APPLICATION
+# ==========================================
 
 async def main():
-    app = web.Application()
+    app = web.Application(
+        client_max_size=1024 * 1024
+    )
 
     # Main health check
     app.router.add_get(
@@ -210,16 +459,22 @@ async def main():
         )
     )
 
-    # Mini App page
+    # Telegram Mini App
     app.router.add_get(
         "/app",
         lambda request: web.FileResponse(WEBAPP_FILE)
     )
 
+    # Telegram authentication API
+    app.router.add_post(
+        "/api/auth/telegram",
+        telegram_auth_handler
+    )
+
     # Telegram webhook
     SimpleRequestHandler(
         dispatcher=dp,
-        bot=bot,
+        bot=bot
     ).register(
         app,
         path=WEBHOOK_PATH
@@ -235,6 +490,7 @@ async def main():
     app.on_shutdown.append(on_shutdown)
 
     runner = web.AppRunner(app)
+
     await runner.setup()
 
     site = web.TCPSite(
