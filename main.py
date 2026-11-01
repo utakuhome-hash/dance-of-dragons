@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 import time
+import re
 
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -33,9 +34,10 @@ from aiogram.webhook.aiohttp_server import (
 # ==========================================
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-
 WEBHOOK_BASE_URL = os.environ["WEBHOOK_BASE_URL"].rstrip("/")
 WEBHOOK_PATH = "/telegram-webhook"
+
+ADMIN_SETUP_CODE = os.getenv("ADMIN_SETUP_CODE", "")
 
 WEB_SERVER_HOST = "0.0.0.0"
 WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
@@ -59,9 +61,7 @@ def main_menu():
             [
                 InlineKeyboardButton(
                     text="🐉 ورود به مینی‌اپ",
-                    web_app=WebAppInfo(
-                        url=f"{WEBHOOK_BASE_URL}/app"
-                    )
+                    web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app")
                 )
             ],
             [
@@ -112,8 +112,7 @@ def main_menu():
 async def start_handler(message: Message):
     await message.answer(
         "به دنیای Dance of Dragons خوش آمدی! 🐉\n\n"
-        "جنگ خاندان‌ها، سیاست و سرنوشت وستروس در انتظار توست.\n\n"
-        "برای ورود به بازی از دکمهٔ زیر استفاده کن:",
+        "برای ورود به بازی از دکمه زیر استفاده کن:",
         reply_markup=main_menu()
     )
 
@@ -132,29 +131,20 @@ sections = {
 
 @dp.callback_query(F.data.in_(sections.keys()))
 async def menu_handler(callback: CallbackQuery):
-    section_name = sections[callback.data]
-
     await callback.answer()
-
     await callback.message.answer(
-        f"{section_name}\n\n"
+        f"{sections[callback.data]}\n\n"
         "این بخش در حال آماده‌سازی است. 🛠️",
         reply_markup=main_menu()
     )
 
 
 # ==========================================
-# TELEGRAM MINI APP AUTHENTICATION
+# TELEGRAM INIT DATA VALIDATION
 # ==========================================
 
 def validate_telegram_init_data(init_data: str):
-    """
-    Validate Telegram Mini App initData.
-    Returns (telegram_id, auth_date) if valid.
-    Otherwise returns None.
-    """
-
-    if not init_data or not isinstance(init_data, str):
+    if not isinstance(init_data, str) or not init_data:
         return None
 
     try:
@@ -164,12 +154,10 @@ def validate_telegram_init_data(init_data: str):
             strict_parsing=True
         )
 
-        # Reject duplicate fields
         if len(dict(parsed_items)) != len(parsed_items):
             return None
 
         data = dict(parsed_items)
-
         received_hash = data.pop("hash", None)
 
         if not received_hash:
@@ -178,7 +166,6 @@ def validate_telegram_init_data(init_data: str):
         auth_date = int(data.get("auth_date", "0"))
         current_time = int(time.time())
 
-        # Reject future or expired authentication data
         if auth_date > current_time + 30:
             return None
 
@@ -208,13 +195,7 @@ def validate_telegram_init_data(init_data: str):
         ):
             return None
 
-        user_json = data.get("user")
-
-        if not user_json:
-            return None
-
-        user_data = json.loads(user_json)
-
+        user_data = json.loads(data["user"])
         telegram_id = int(user_data["id"])
 
         if telegram_id <= 0:
@@ -222,27 +203,59 @@ def validate_telegram_init_data(init_data: str):
 
         return telegram_id, auth_date
 
-    except (
-        ValueError,
-        TypeError,
-        KeyError,
-        json.JSONDecodeError
-    ):
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
 
 
-async def telegram_auth_handler(request: web.Request):
-    """
-    Authenticate Telegram Mini App user
-    and create a server-side session.
-    """
+# ==========================================
+# SESSION CREATION
+# ==========================================
 
+async def create_player_session(connection, player_id):
+    token = secrets.token_urlsafe(32)
+
+    token_hash = hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+    await connection.execute(
+        """
+        INSERT INTO player_sessions (
+            player_id,
+            session_token_hash,
+            created_at,
+            expires_at
+        )
+        VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days')
+        """,
+        player_id,
+        token_hash
+    )
+
+    return token
+
+
+def player_response(player, token):
+    return web.json_response({
+        "ok": True,
+        "token": token,
+        "player": {
+            "id": player["id"],
+            "username": player["username"],
+            "role": player["role"],
+            "house_id": player["house_id"]
+        }
+    })
+
+
+# ==========================================
+# NORMAL TELEGRAM LOGIN
+# ==========================================
+
+async def telegram_auth_handler(request: web.Request):
     if db_pool is None:
         return web.json_response(
-            {
-                "ok": False,
-                "error": "database_unavailable"
-            },
+            {"ok": False, "error": "database_unavailable"},
             status=503
         )
 
@@ -250,32 +263,23 @@ async def telegram_auth_handler(request: web.Request):
         body = await request.json()
     except (ValueError, json.JSONDecodeError):
         return web.json_response(
-            {
-                "ok": False,
-                "error": "invalid_request"
-            },
+            {"ok": False, "error": "invalid_request"},
             status=400
         )
 
     if not isinstance(body, dict):
         return web.json_response(
-            {
-                "ok": False,
-                "error": "invalid_request"
-            },
+            {"ok": False, "error": "invalid_request"},
             status=400
         )
 
-    init_data = body.get("initData", "")
-
-    auth_result = validate_telegram_init_data(init_data)
+    auth_result = validate_telegram_init_data(
+        body.get("initData", "")
+    )
 
     if not auth_result:
         return web.json_response(
-            {
-                "ok": False,
-                "error": "invalid_telegram_auth"
-            },
+            {"ok": False, "error": "invalid_telegram_auth"},
             status=401
         )
 
@@ -283,49 +287,29 @@ async def telegram_auth_handler(request: web.Request):
 
     try:
         async with db_pool.acquire() as connection:
-
-            player = await connection.fetchrow(
-                """
-                SELECT
-                    id,
-                    username,
-                    role,
-                    house_id,
-                    is_active
-                FROM players
-                WHERE telegram_id = $1
-                """,
-                telegram_id
-            )
-
-            # No automatic account creation
-            if not player:
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "account_not_found"
-                    },
-                    status=403
-                )
-
-            if not player["is_active"]:
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "account_disabled"
-                    },
-                    status=403
-                )
-
-            # Create a random session token.
-            # Only its SHA-256 hash is stored in the database.
-            session_token = secrets.token_urlsafe(32)
-
-            session_hash = hashlib.sha256(
-                session_token.encode("utf-8")
-            ).hexdigest()
-
             async with connection.transaction():
+
+                player = await connection.fetchrow(
+                    """
+                    SELECT id, username, role, house_id, is_active
+                    FROM players
+                    WHERE telegram_id = $1
+                    FOR UPDATE
+                    """,
+                    telegram_id
+                )
+
+                if not player:
+                    return web.json_response(
+                        {"ok": False, "error": "account_not_found"},
+                        status=403
+                    )
+
+                if not player["is_active"]:
+                    return web.json_response(
+                        {"ok": False, "error": "account_disabled"},
+                        status=403
+                    )
 
                 await connection.execute(
                     """
@@ -337,49 +321,162 @@ async def telegram_auth_handler(request: web.Request):
                     player["id"]
                 )
 
-                await connection.execute(
-                    """
-                    INSERT INTO player_sessions (
-                        player_id,
-                        session_token_hash,
-                        created_at,
-                        expires_at
-                    )
-                    VALUES (
-                        $1,
-                        $2,
-                        NOW(),
-                        NOW() + INTERVAL '7 days'
-                    )
-                    """,
-                    player["id"],
-                    session_hash
+                token = await create_player_session(
+                    connection,
+                    player["id"]
                 )
 
+        return player_response(player, token)
+
+    except Exception:
+        print("Telegram login failed", flush=True)
         return web.json_response(
-            {
-                "ok": True,
-                "token": session_token,
-                "player": {
-                    "id": player["id"],
-                    "username": player["username"],
-                    "role": player["role"],
-                    "house_id": player["house_id"]
-                }
-            }
+            {"ok": False, "error": "authentication_failed"},
+            status=500
+        )
+
+
+# ==========================================
+# FIRST ADMIN BOOTSTRAP
+# ==========================================
+
+async def admin_bootstrap_handler(request: web.Request):
+    if db_pool is None:
+        return web.json_response(
+            {"ok": False, "error": "database_unavailable"},
+            status=503
+        )
+
+    if len(ADMIN_SETUP_CODE) < 24:
+        return web.json_response(
+            {"ok": False, "error": "admin_setup_not_configured"},
+            status=503
+        )
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
+
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
+
+    supplied_code = body.get("setupCode", "")
+    init_data = body.get("initData", "")
+
+    if not isinstance(supplied_code, str):
+        return web.json_response(
+            {"ok": False, "error": "invalid_request"},
+            status=400
+        )
+
+    if not hmac.compare_digest(
+        supplied_code.encode("utf-8"),
+        ADMIN_SETUP_CODE.encode("utf-8")
+    ):
+        return web.json_response(
+            {"ok": False, "error": "invalid_setup_code"},
+            status=403
+        )
+
+    auth_result = validate_telegram_init_data(init_data)
+
+    if not auth_result:
+        return web.json_response(
+            {"ok": False, "error": "invalid_telegram_auth"},
+            status=401
+        )
+
+    telegram_id, auth_date = auth_result
+
+    # Username is generated from the verified Telegram ID.
+    admin_username = f"admin_{telegram_id}"
+
+    try:
+        async with db_pool.acquire() as connection:
+            async with connection.transaction():
+
+                # Serialize bootstrap attempts.
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(739201846)"
+                )
+
+                existing_admin = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM players
+                        WHERE role = 'admin'
+                    )
+                    """
+                )
+
+                if existing_admin:
+                    return web.json_response(
+                        {"ok": False, "error": "admin_already_exists"},
+                        status=403
+                    )
+
+                existing_player = await connection.fetchrow(
+                    """
+                    SELECT id
+                    FROM players
+                    WHERE telegram_id = $1
+                    """,
+                    telegram_id
+                )
+
+                if existing_player:
+                    return web.json_response(
+                        {"ok": False, "error": "telegram_already_registered"},
+                        status=409
+                    )
+
+                player = await connection.fetchrow(
+                    """
+                    INSERT INTO players (
+                        username,
+                        password_hash,
+                        telegram_id,
+                        role,
+                        house_id,
+                        is_active,
+                        created_at,
+                        telegram_auth_date
+                    )
+                    VALUES (
+                        $1, NULL, $2, 'admin', NULL, TRUE, NOW(), $3
+                    )
+                    RETURNING id, username, role, house_id, is_active
+                    """,
+                    admin_username,
+                    telegram_id,
+                    auth_date
+                )
+
+                token = await create_player_session(
+                    connection,
+                    player["id"]
+                )
+
+        return player_response(player, token)
+
+    except asyncpg.UniqueViolationError:
+        return web.json_response(
+            {"ok": False, "error": "account_conflict"},
+            status=409
         )
 
     except Exception:
-        print(
-            "Telegram authentication database error",
-            flush=True
-        )
-
+        print("Admin bootstrap failed", flush=True)
         return web.json_response(
-            {
-                "ok": False,
-                "error": "authentication_failed"
-            },
+            {"ok": False, "error": "admin_setup_failed"},
             status=500
         )
 
@@ -417,10 +514,7 @@ async def on_startup(app: web.Application):
         url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
     )
 
-    print(
-        "Telegram webhook configured",
-        flush=True
-    )
+    print("Telegram webhook configured", flush=True)
 
 
 # ==========================================
@@ -436,10 +530,7 @@ async def on_shutdown(app: web.Application):
 
     await bot.session.close()
 
-    print(
-        "Application shutdown complete",
-        flush=True
-    )
+    print("Application shutdown complete", flush=True)
 
 
 # ==========================================
@@ -451,27 +542,26 @@ async def main():
         client_max_size=1024 * 1024
     )
 
-    # Main health check
     app.router.add_get(
         "/",
-        lambda request: web.Response(
-            text="Bot is running"
-        )
+        lambda request: web.Response(text="Bot is running")
     )
 
-    # Telegram Mini App
     app.router.add_get(
         "/app",
         lambda request: web.FileResponse(WEBAPP_FILE)
     )
 
-    # Telegram authentication API
     app.router.add_post(
         "/api/auth/telegram",
         telegram_auth_handler
     )
 
-    # Telegram webhook
+    app.router.add_post(
+        "/api/admin/bootstrap",
+        admin_bootstrap_handler
+    )
+
     SimpleRequestHandler(
         dispatcher=dp,
         bot=bot
@@ -490,7 +580,6 @@ async def main():
     app.on_shutdown.append(on_shutdown)
 
     runner = web.AppRunner(app)
-
     await runner.setup()
 
     site = web.TCPSite(
