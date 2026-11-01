@@ -3,426 +3,359 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dance of Dragons</title>
-
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;900&display=swap');
 
 :root {
-    --bg: #090909;
-    --panel: #151515;
-    --gold: #c9a44c;
-    --muted: #999;
-    --border: #302719;
+  --bg:#090909;
+  --panel:#151515;
+  --gold:#c9a44c;
+  --muted:#999;
+  --border:#302719;
 }
-
-* {
-    box-sizing: border-box;
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:#f5f0e5;
+  font-family:'Vazirmatn',sans-serif;min-height:100vh;
 }
-
-body {
-    margin: 0;
-    background: var(--bg);
-    color: #f5f0e5;
-    font-family: 'Vazirmatn', sans-serif;
-    min-height: 100vh;
+header{
+  padding:25px 15px;text-align:center;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,#20190f,#090909);
 }
-
-header {
-    padding: 28px 20px 20px;
-    text-align: center;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, #20190f, #090909);
+.logo{font-size:38px}
+h1{color:var(--gold);font-size:23px;margin:8px}
+.subtitle{color:var(--muted);font-size:12px}
+main{padding:16px 16px 100px}
+.panel{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:12px;padding:17px;margin:15px 0;
 }
-
-.logo {
-    font-size: 34px;
+h2{font-size:17px;color:var(--gold);margin-top:0}
+input{
+  display:block;width:100%;padding:13px;margin:12px 0;
+  border-radius:8px;border:1px solid var(--border);
+  background:#090909;color:white;font:inherit;
 }
-
-h1 {
-    color: var(--gold);
-    font-size: 23px;
-    margin: 8px 0;
+button{
+  font-family:inherit;cursor:pointer;
 }
-
-.subtitle {
-    color: var(--muted);
-    font-size: 12px;
+.action{
+  width:100%;padding:13px;border:0;border-radius:8px;
+  background:var(--gold);color:#15110a;font-weight:900;
+  font-size:14px;margin-top:8px;
 }
-
-.season {
-    margin: 20px;
-    padding: 16px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.card{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:12px;padding:18px 10px;text-align:center;
+  cursor:pointer;
 }
-
-.season strong {
-    color: var(--gold);
+.card .icon{font-size:28px}
+.card h3{font-size:14px;margin:9px 0 3px}
+.card p{font-size:11px;color:var(--muted);margin:0}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.section-title{color:var(--gold);margin:22px 4px 12px}
+#status{
+  padding:13px;margin:15px 0;border:1px solid var(--border);
+  border-radius:9px;background:var(--panel);
+  font-size:12px;line-height:2;text-align:center;
 }
-
-main {
-    padding: 0 16px 100px;
+.error{color:#e8a09a!important;border-color:#713b35!important}
+.success{color:#a9d6a5!important;border-color:#426b3e!important}
+.hidden{display:none!important}
+.badge{
+  display:inline-block;padding:5px 12px;border-radius:20px;
+  color:var(--gold);border:1px solid var(--gold);font-size:12px;
 }
-
-.section-title {
-    color: var(--gold);
-    font-size: 16px;
-    margin: 24px 4px 14px;
+.notice{
+  padding:14px;background:#17130c;border-right:3px solid var(--gold);
+  border-radius:8px;font-size:12px;color:#d5c7a5;margin-top:18px;
 }
-
-.grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+nav{
+  position:fixed;bottom:0;right:0;left:0;background:#111;
+  border-top:1px solid var(--border);display:flex;
+  justify-content:space-around;padding:12px 4px;
+  padding-bottom:max(12px,env(safe-area-inset-bottom));
 }
-
-.card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px 12px;
-    text-align: center;
-    cursor: pointer;
-    transition: 0.2s;
-}
-
-.card:active {
-    transform: scale(0.96);
-    border-color: var(--gold);
-}
-
-.card .icon {
-    font-size: 29px;
-}
-
-.card h3 {
-    font-size: 14px;
-    margin: 10px 0 4px;
-}
-
-.card p {
-    color: var(--muted);
-    font-size: 11px;
-    margin: 0;
-}
-
-.notice {
-    margin-top: 20px;
-    padding: 15px;
-    border-right: 3px solid var(--gold);
-    background: #17130c;
-    border-radius: 8px;
-    font-size: 12px;
-    color: #d5c7a5;
-}
-
-nav {
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    left: 0;
-    background: #111;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-around;
-    padding: 12px 4px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-}
-
-nav button {
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-family: inherit;
-    font-size: 11px;
-}
-
-nav button span {
-    display: block;
-    font-size: 20px;
-    margin-bottom: 3px;
-}
-
-nav button.active {
-    color: var(--gold);
-}
-
-#message {
-    color: var(--gold);
-    text-align: center;
-    padding: 15px;
-    font-size: 13px;
-    line-height: 2;
-}
-
-#auth-status {
-    margin: 16px 20px 0;
-    padding: 13px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel);
-    text-align: center;
-    font-size: 12px;
-    line-height: 2;
-}
-
-#auth-status.error {
-    color: #e8a09a;
-    border-color: #713b35;
-}
-
-#auth-status.success {
-    color: #a9d6a5;
-    border-color: #426b3e;
-}
-
-#auth-status.loading {
-    color: var(--gold);
-}
-
-.player-info {
-    color: var(--gold);
-    margin-top: 5px;
-    font-weight: 700;
-}
+nav button{background:none;border:0;color:var(--muted);font-size:11px}
+nav span{display:block;font-size:20px}
 </style>
 </head>
 
 <body>
 
 <header>
-    <div class="logo">🐉</div>
-    <h1>Dance of Dragons</h1>
-    <div class="subtitle">جنگ خاندان‌ها بر سر تاج و تخت وستروس</div>
+  <div class="logo">🐉</div>
+  <h1>Dance of Dragons</h1>
+  <div class="subtitle">جنگ خاندان‌ها بر سر تاج و تخت وستروس</div>
 </header>
-
-<div class="season">
-    <div>
-        <div>سال بازی</div>
-        <strong>129 AC</strong>
-    </div>
-    <div>
-        <div>فصل</div>
-        <strong>بهار 🌸</strong>
-    </div>
-    <div>
-        <div>وضعیت</div>
-        <strong>آماده‌سازی</strong>
-    </div>
-</div>
-
-<div id="auth-status" class="loading">
-    در حال بررسی هویت تلگرامی...
-</div>
 
 <main>
 
-    <div class="section-title">قلمرو پادشاهی</div>
+<div id="status">در حال بررسی هویت تلگرامی...</div>
 
-    <div class="grid">
+<section id="bootstrap" class="panel hidden">
+  <h2>👑 راه‌اندازی اولین مدیر</h2>
+  <p>این بخش فقط برای ساخت اولین حساب مدیر بازی است.</p>
+  <input id="setup-code" type="password"
+    placeholder="کد محرمانه راه‌اندازی"
+    autocomplete="off">
+  <button class="action" id="bootstrap-button" onclick="bootstrapAdmin()">
+    ساخت حساب مدیر
+  </button>
+</section>
 
-        <div class="card" onclick="openSection('قلمرو من')">
-            <div class="icon">🏰</div>
-            <h3>قلمرو من</h3>
-            <p>قلعه و دارایی‌ها</p>
-        </div>
+<section id="player-panel" class="hidden">
+  <div class="panel">
+    <h2>🏰 پنل بازیکن</h2>
+    <div id="player-name"></div>
+    <div class="badge">بازیکن</div>
+  </div>
 
-        <div class="card" onclick="openSection('خاندان‌ها')">
-            <div class="icon">👑</div>
-            <h3>خاندان‌ها</h3>
-            <p>قدرت و سیاست</p>
-        </div>
-
-        <div class="card" onclick="openSection('ارتش')">
-            <div class="icon">⚔️</div>
-            <h3>ارتش</h3>
-            <p>سربازان و فرماندهان</p>
-        </div>
-
-        <div class="card" onclick="openSection('اژدهای من')">
-            <div class="icon">🐉</div>
-            <h3>اژدهای من</h3>
-            <p>اژدها و سوارکار</p>
-        </div>
-
-        <div class="card" onclick="openSection('نقشه وستروس')">
-            <div class="icon">🗺️</div>
-            <h3>نقشه وستروس</h3>
-            <p>مناطق و قلعه‌ها</p>
-        </div>
-
-        <div class="card" onclick="openSection('اقتصاد')">
-            <div class="icon">💰</div>
-            <h3>اقتصاد</h3>
-            <p>خزانه و منابع</p>
-        </div>
-
-        <div class="card" onclick="openSection('پیام‌ها')">
-            <div class="icon">🕊️</div>
-            <h3>پیام‌ها</h3>
-            <p>نامه‌های کلاغی</p>
-        </div>
-
-        <div class="card" onclick="openSection('مأموریت‌ها')">
-            <div class="icon">📜</div>
-            <h3>مأموریت‌ها</h3>
-            <p>وظایف خاندان</p>
-        </div>
-
+  <div class="section-title">قلمرو پادشاهی</div>
+  <div class="grid">
+    <div class="card" onclick="openSection('قلمرو من')">
+      <div class="icon">🏰</div><h3>قلمرو من</h3>
+      <p>قلعه و دارایی‌ها</p>
     </div>
-
-    <div class="notice">
-        ⚜️ وستروس در آستانهٔ جنگی بزرگ قرار دارد.
-        سرنوشت هفت پادشاهی در دستان خاندان‌هاست.
+    <div class="card" onclick="openSection('خاندان‌ها')">
+      <div class="icon">👑</div><h3>خاندان‌ها</h3>
+      <p>قدرت و سیاست</p>
     </div>
+    <div class="card" onclick="openSection('ارتش')">
+      <div class="icon">⚔️</div><h3>ارتش</h3>
+      <p>سربازان و فرماندهان</p>
+    </div>
+    <div class="card" onclick="openSection('اژدهای من')">
+      <div class="icon">🐉</div><h3>اژدهای من</h3>
+      <p>اژدها و سوارکار</p>
+    </div>
+    <div class="card" onclick="openSection('نقشه وستروس')">
+      <div class="icon">🗺️</div><h3>نقشه وستروس</h3>
+      <p>مناطق و قلعه‌ها</p>
+    </div>
+    <div class="card" onclick="openSection('اقتصاد')">
+      <div class="icon">💰</div><h3>اقتصاد</h3>
+      <p>خزانه و منابع</p>
+    </div>
+    <div class="card" onclick="openSection('پیام‌ها')">
+      <div class="icon">🕊️</div><h3>پیام‌ها</h3>
+      <p>نامه‌های کلاغی</p>
+    </div>
+    <div class="card" onclick="openSection('مأموریت‌ها')">
+      <div class="icon">📜</div><h3>مأموریت‌ها</h3>
+      <p>وظایف خاندان</p>
+    </div>
+  </div>
+</section>
 
-    <div id="message"></div>
+<section id="admin-panel" class="hidden">
+  <div class="panel">
+    <h2>👑 پنل مدیریت کل وستروس</h2>
+    <div id="admin-name"></div>
+    <div class="badge">مدیر کل | ADMIN</div>
+  </div>
+
+  <div class="section-title">مرکز فرماندهی</div>
+  <div class="grid">
+    <div class="card" onclick="openSection('مدیریت بازیکنان')">
+      <div class="icon">👥</div><h3>بازیکنان</h3>
+      <p>حساب‌ها و دسترسی‌ها</p>
+    </div>
+    <div class="card" onclick="openSection('مدیریت خاندان‌ها')">
+      <div class="icon">🏰</div><h3>خاندان‌ها</h3>
+      <p>مدیریت قلمروها</p>
+    </div>
+    <div class="card" onclick="openSection('مدیریت رویدادها')">
+      <div class="icon">📜</div><h3>رویدادها</h3>
+      <p>بررسی و تأیید رویدادها</p>
+    </div>
+    <div class="card" onclick="openSection('اقتصاد بازی')">
+      <div class="icon">💰</div><h3>اقتصاد بازی</h3>
+      <p>منابع و خزانه‌ها</p>
+    </div>
+    <div class="card" onclick="openSection('اخبار عمومی')">
+      <div class="icon">📰</div><h3>اخبار</h3>
+      <p>مدیریت اخبار بازی</p>
+    </div>
+    <div class="card" onclick="openSection('گزارش‌های مدیریتی')">
+      <div class="icon">📊</div><h3>گزارش‌ها</h3>
+      <p>وضعیت کلی بازی</p>
+    </div>
+    <div class="card" onclick="openSection('امنیت بازی')">
+      <div class="icon">🛡️</div><h3>امنیت</h3>
+      <p>کنترل دسترسی‌ها</p>
+    </div>
+    <div class="card" onclick="openSection('تنظیمات بازی')">
+      <div class="icon">⚙️</div><h3>تنظیمات</h3>
+      <p>مدیریت جهان بازی</p>
+    </div>
+  </div>
+</section>
+
+<div class="notice">
+  ⚜️ وستروس در آستانه جنگی بزرگ قرار دارد.
+  سرنوشت هفت پادشاهی در دستان خاندان‌هاست.
+</div>
+
+<div id="message"></div>
 
 </main>
 
 <nav>
-    <button class="active" onclick="openSection('خانه', this)">
-        <span>🏠</span>خانه
-    </button>
-
-    <button onclick="openSection('قلمرو من', this)">
-        <span>🏰</span>قلمرو
-    </button>
-
-    <button onclick="openSection('ارتش', this)">
-        <span>⚔️</span>ارتش
-    </button>
-
-    <button onclick="openSection('نقشه', this)">
-        <span>🗺️</span>نقشه
-    </button>
+  <button onclick="openSection('خانه')"><span>🏠</span>خانه</button>
+  <button onclick="openSection('قلمرو')"><span>🏰</span>قلمرو</button>
+  <button onclick="openSection('ارتش')"><span>⚔️</span>ارتش</button>
+  <button onclick="openSection('نقشه')"><span>🗺️</span>نقشه</button>
 </nav>
 
 <script>
 const tg = window.Telegram?.WebApp;
+const statusBox = document.getElementById("status");
 
-const authStatus = document.getElementById("auth-status");
-
-function showAuthStatus(message, type = "") {
-    authStatus.className = type;
-    authStatus.textContent = message;
+function showStatus(text, type="") {
+  statusBox.className = type;
+  statusBox.textContent = text;
 }
 
-function openSection(name, button) {
-    document.getElementById("message").textContent =
-        name + " — این بخش در حال آماده‌سازی است.";
+function openSection(name) {
+  document.getElementById("message").textContent =
+    name + " — این بخش هنوز در حال آماده‌سازی است.";
+}
 
-    if (button) {
-        document.querySelectorAll("nav button").forEach(item => {
-            item.classList.remove("active");
-        });
+function showPlayer(player) {
+  document.getElementById("bootstrap").classList.add("hidden");
 
-        button.classList.add("active");
-    }
+  if (player.role === "admin") {
+    document.getElementById("admin-panel").classList.remove("hidden");
+    document.getElementById("admin-name").textContent =
+      "مدیر: " + player.username;
+    document.getElementById("player-panel").classList.add("hidden");
+  } else {
+    document.getElementById("player-panel").classList.remove("hidden");
+    document.getElementById("player-name").textContent =
+      "بازیکن: " + player.username;
+    document.getElementById("admin-panel").classList.add("hidden");
+  }
+
+  showStatus("ورود موفقیت‌آمیز بود.", "success");
+}
+
+async function postJSON(url, data) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(data)
+  });
+
+  const result = await response.json();
+  return {response, result};
 }
 
 async function authenticateTelegram() {
-    if (!tg) {
-        showAuthStatus(
-            "برای ورود، بازی را از طریق ربات تلگرام باز کن.",
-            "error"
-        );
-        return;
+  if (!tg) {
+    showStatus("بازی را از طریق ربات تلگرام باز کن.", "error");
+    return;
+  }
+
+  tg.ready();
+  tg.expand();
+
+  if (!tg.initData) {
+    showStatus("اطلاعات احراز هویت تلگرام دریافت نشد.", "error");
+    return;
+  }
+
+  showStatus("در حال اتصال امن به سرور...");
+
+  try {
+    const {response, result} = await postJSON(
+      "/api/auth/telegram",
+      {initData:tg.initData}
+    );
+
+    if (response.ok && result.ok && result.player) {
+      sessionStorage.setItem("dod_session_token", result.token);
+      showPlayer(result.player);
+      return;
     }
 
-    tg.ready();
-    tg.expand();
-
-    const initData = tg.initData;
-
-    if (!initData) {
-        showAuthStatus(
-            "اطلاعات احراز هویت تلگرام دریافت نشد.",
-            "error"
-        );
-        return;
+    if (result.error === "account_not_found") {
+      showStatus("هنوز حسابی برای تلگرام تو ثبت نشده است.");
+      document.getElementById("bootstrap").classList.remove("hidden");
+      return;
     }
 
-    showAuthStatus("در حال اتصال امن به سرور...", "loading");
-
-    try {
-        const response = await fetch("/api/auth/telegram", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                initData: initData
-            })
-        });
-
-        const result = await response.json();
-
-        if (!response.ok || !result.ok) {
-            if (result.error === "account_not_found") {
-                showAuthStatus(
-                    "حساب بازی برای این تلگرام ثبت نشده است. لطفاً با مدیر بازی تماس بگیر.",
-                    "error"
-                );
-            } else if (result.error === "account_disabled") {
-                showAuthStatus(
-                    "حساب بازی شما غیرفعال است.",
-                    "error"
-                );
-            } else if (result.error === "invalid_telegram_auth") {
-                showAuthStatus(
-                    "اعتبار اطلاعات تلگرام تأیید نشد. بازی را دوباره باز کن.",
-                    "error"
-                );
-            } else {
-                showAuthStatus(
-                    "ورود انجام نشد. لطفاً بعداً دوباره تلاش کن.",
-                    "error"
-                );
-            }
-
-            return;
-        }
-
-        if (!result.token || !result.player) {
-            showAuthStatus(
-                "پاسخ سرور معتبر نیست.",
-                "error"
-            );
-            return;
-        }
-
-        // Store the session token only for this browser tab.
-        sessionStorage.setItem("dod_session_token", result.token);
-
-        showAuthStatus(
-            "ورود موفقیت‌آمیز بود.",
-            "success"
-        );
-
-        const playerInfo = document.createElement("div");
-        playerInfo.className = "player-info";
-        playerInfo.textContent =
-            "بازیکن: " + result.player.username;
-
-        authStatus.appendChild(playerInfo);
-
-    } catch (error) {
-        console.error("Authentication error:", error);
-
-        showAuthStatus(
-            "ارتباط با سرور برقرار نشد. اتصال اینترنت را بررسی کن.",
-            "error"
-        );
+    if (result.error === "account_disabled") {
+      showStatus("حساب بازی غیرفعال است.", "error");
+      return;
     }
+
+    showStatus("ورود انجام نشد: " + result.error, "error");
+
+  } catch (error) {
+    console.error(error);
+    showStatus("ارتباط با سرور برقرار نشد.", "error");
+  }
+}
+
+async function bootstrapAdmin() {
+  const codeInput = document.getElementById("setup-code");
+  const button = document.getElementById("bootstrap-button");
+  const setupCode = codeInput.value;
+
+  if (!setupCode) {
+    showStatus("کد راه‌اندازی را وارد کن.", "error");
+    return;
+  }
+
+  if (!tg || !tg.initData) {
+    showStatus("اطلاعات تلگرام در دسترس نیست.", "error");
+    return;
+  }
+
+  button.disabled = true;
+  showStatus("در حال بررسی و ساخت حساب مدیر...");
+
+  try {
+    const {response, result} = await postJSON(
+      "/api/admin/bootstrap",
+      {
+        setupCode:setupCode,
+        initData:tg.initData
+      }
+    );
+
+    codeInput.value = "";
+
+    if (response.ok && result.ok && result.player) {
+      sessionStorage.setItem("dod_session_token", result.token);
+      showPlayer(result.player);
+      showStatus("حساب مدیر با موفقیت ساخته شد.", "success");
+      return;
+    }
+
+    if (result.error === "admin_already_exists") {
+      showStatus("حساب مدیر قبلاً ساخته شده است.", "error");
+      document.getElementById("bootstrap").classList.add("hidden");
+    } else if (result.error === "invalid_setup_code") {
+      showStatus("کد راه‌اندازی صحیح نیست.", "error");
+    } else if (result.error === "telegram_already_registered") {
+      showStatus("این تلگرام قبلاً حساب بازیکن دارد.", "error");
+    } else {
+      showStatus("ساخت مدیر انجام نشد: " + result.error, "error");
+    }
+
+  } catch (error) {
+    console.error(error);
+    codeInput.value = "";
+    showStatus("ارتباط با سرور برقرار نشد.", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 authenticateTelegram();
