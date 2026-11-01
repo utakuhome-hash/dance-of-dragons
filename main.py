@@ -46,15 +46,15 @@ async def on_startup(app: web.Application):
         max_size=3,
     )
 
-    async with db_pool.acquire() as connection:
+        async with db_pool.acquire() as connection:
         result = await connection.fetchval("SELECT 1")
+        print(f"DATABASE CHECK: {result}", flush=True)
 
-    print(f"Database connection successful: {result}")
+    print(f"Database connection successful: {result}", flush=True)
 
     await bot.set_webhook(
         url=f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
     )
-
 
 async def on_shutdown(app: web.Application):
     if db_pool:
