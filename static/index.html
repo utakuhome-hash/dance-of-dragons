@@ -82,13 +82,22 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
  function enter(player){
   gate.hidden=true;shell.style.display='';
   const mast=shell.querySelector('.mast');
-  if(mast&&!document.getElementById('dodAccountStrip')){
-   const bar=document.createElement('div');bar.id='dodAccountStrip';bar.className='account-strip';
-   const label=document.createElement('span');label.textContent='شخصیت: '+(player.username||'بازیکن');bar.append(label);
+  if(mast){
+   let bar=document.getElementById('dodAccountStrip');
+   if(!bar){bar=document.createElement('div');bar.id='dodAccountStrip';bar.className='account-strip';}
+   bar.replaceChildren();
+   const label=document.createElement('span');
+   label.textContent='شخصیت: '+(player.username||'بازیکن');
+   const house=document.createElement('span');
+   house.textContent=player.house_id?'شناسه خاندان: '+player.house_id:'هنوز خاندانی به این حساب اختصاص نیافته است';
+   bar.append(label,house);
    if(player.is_super_admin){const b=document.createElement('button');b.textContent='مدیریت بازیکن‌ها';b.onclick=adminOpen;bar.append(b);}
    const out=document.createElement('button');out.textContent='خروج';out.onclick=logout;bar.append(out);
-   mast.append(bar);mast.style.height='auto';mast.style.minHeight='66px';mast.style.flexWrap='wrap';
+   if(!bar.parentNode)mast.append(bar);
+   mast.style.height='auto';mast.style.minHeight='66px';mast.style.flexWrap='wrap';
   }
+  const frame=document.getElementById('view');
+  if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:'dod-account',player:{username:player.username||'بازیکن',house_id:player.house_id||null}},'*');
  }
  async function login(){
   retry.hidden=true;msg.textContent='در حال بررسی هویت تلگرام…';
@@ -106,7 +115,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
  async function loadPlayers(){
   const list=document.getElementById('playersList');list.textContent='در حال دریافت…';
   try{const d=await api('/api/admin/players?limit=50');list.innerHTML='';
-   d.players.forEach(p=>{const row=document.createElement('div');row.className='player-row';const n=document.createElement('span');n.textContent=p.username||'بدون نام';const i=document.createElement('span');i.textContent=String(p.telegram_id||'');row.append(n,i);list.append(row);});
+   d.players.forEach(p=>{const row=document.createElement('div');row.className='player-row';const n=document.createElement('span');n.textContent=p.username||'بدون نام';const i=document.createElement('span');i.textContent=String(p.telegram_id||'');const house=document.createElement('small');house.textContent=p.house_id?'خاندان: '+p.house_id:'بدون خاندان';row.append(n,i,house);list.append(row);});
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
   }catch(e){list.textContent='دریافت فهرست انجام نشد: '+e.message;}
  }
