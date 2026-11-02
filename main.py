@@ -26,6 +26,149 @@ WEBAPP_FILE = BASE_DIR / "static" / "index.html"
 # This is the players.id value of the existing super-admin account.
 SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "1"))
 
+HOUSE_SEEDS = [
+    [
+        "استارک",
+        "وینترفل"
+    ],
+    [
+        "کارستارک",
+        "کارهولد"
+    ],
+    [
+        "داستین",
+        "باروتون"
+    ],
+    [
+        "آمبر",
+        "لست هرت"
+    ],
+    [
+        "آرین",
+        "ایری"
+    ],
+    [
+        "رویس",
+        "رانستون"
+    ],
+    [
+        "کوربری",
+        "هارتس هوم"
+    ],
+    [
+        "گریجوی",
+        "پایک"
+    ],
+    [
+        "هارلاو",
+        "ده برج"
+    ],
+    [
+        "گودبروتر",
+        "گریت ویک"
+    ],
+    [
+        "بلک‌تاید",
+        "بلک‌تاید"
+    ],
+    [
+        "تالی",
+        "ریوران"
+    ],
+    [
+        "فری",
+        "تویینز"
+    ],
+    [
+        "برکن",
+        "استون هِج"
+    ],
+    [
+        "بلک‌وود",
+        "ریون‌تری هال"
+    ],
+    [
+        "لنیستر",
+        "کسترلی راک"
+    ],
+    [
+        "کراکهال",
+        "کراکهال"
+    ],
+    [
+        "لفورد",
+        "گلدن توث"
+    ],
+    [
+        "تارگرین",
+        "کینگزلندینگ"
+    ],
+    [
+        "سیلتیگار",
+        "کلاو آیل"
+    ],
+    [
+        "ولاریون",
+        "دریفت‌مارک"
+    ],
+    [
+        "دارکلین",
+        "دانسکندیل"
+    ],
+    [
+        "بارثیون",
+        "استورمزاند"
+    ],
+    [
+        "کارون",
+        "نایت‌سانگ"
+    ],
+    [
+        "فل",
+        "فل‌وود هال"
+    ],
+    [
+        "سوان",
+        "استون‌هلم"
+    ],
+    [
+        "تایرل",
+        "های‌گاردن"
+    ],
+    [
+        "ردواین",
+        "آربور"
+    ],
+    [
+        "های‌تاور",
+        "اولدتاون"
+    ],
+    [
+        "تارلی",
+        "هورن هیل"
+    ],
+    [
+        "مارتل",
+        "سان‌اسپیر"
+    ],
+    [
+        "دین",
+        "استارفال"
+    ],
+    [
+        "یرونوود",
+        "یرونوود"
+    ],
+    [
+        "آلیرین",
+        "گادزگریس"
+    ],
+    [
+        "فاولر",
+        "اسکای‌ریچ"
+    ]
+]
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     required = ("PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD")
@@ -123,9 +266,10 @@ async def get_authenticated_player(request):
         row = await conn.fetchrow(
             """
             SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
-                   p.is_active, p.is_super_admin
+                   h.name AS house_name, p.is_active, p.is_super_admin
             FROM player_sessions s
             JOIN players p ON p.id = s.player_id
+            LEFT JOIN houses h ON h.id = p.house_id
             WHERE s.session_token_hash = $1
               AND s.revoked_at IS NULL
               AND s.expires_at > NOW()
@@ -164,10 +308,11 @@ async def auth_handler(request):
     async with request.app["db"].acquire() as conn:
         player = await conn.fetchrow(
             """
-            SELECT id, username, telegram_id, role, house_id,
-                   is_active, is_super_admin
-            FROM players
-            WHERE telegram_id = $1
+            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                   h.name AS house_name, p.is_active, p.is_super_admin
+            FROM players p
+            LEFT JOIN houses h ON h.id = p.house_id
+            WHERE p.telegram_id = $1
             """,
             telegram_id,
         )
@@ -202,6 +347,7 @@ async def auth_handler(request):
             "telegram_id": player["telegram_id"],
             "role": player["role"],
             "house_id": player["house_id"],
+            "house_name": player["house_name"],
             "is_active": player["is_active"],
             "is_super_admin": player["is_super_admin"],
         }
@@ -258,13 +404,14 @@ async def admin_players_handler(request):
             )
             rows = await conn.fetch(
                 """
-                SELECT id, username, telegram_id, role, house_id,
-                       is_active, is_super_admin
-                FROM players
-                WHERE username ILIKE $1
-                   OR telegram_id::text ILIKE $1
-                   OR id::text ILIKE $1
-                ORDER BY id DESC
+                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                       h.name AS house_name, p.is_active, p.is_super_admin
+                FROM players p
+                LEFT JOIN houses h ON h.id = p.house_id
+                WHERE p.username ILIKE $1
+                   OR p.telegram_id::text ILIKE $1
+                   OR p.id::text ILIKE $1
+                ORDER BY p.id DESC
                 LIMIT $2 OFFSET $3
                 """,
                 pattern, per_page, offset,
@@ -273,10 +420,11 @@ async def admin_players_handler(request):
             total = await conn.fetchval("SELECT COUNT(*) FROM players")
             rows = await conn.fetch(
                 """
-                SELECT id, username, telegram_id, role, house_id,
-                       is_active, is_super_admin
-                FROM players
-                ORDER BY id DESC
+                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                       h.name AS house_name, p.is_active, p.is_super_admin
+                FROM players p
+                LEFT JOIN houses h ON h.id = p.house_id
+                ORDER BY p.id DESC
                 LIMIT $1 OFFSET $2
                 """,
                 per_page, offset,
@@ -291,6 +439,50 @@ async def admin_players_handler(request):
         "pages": pages,
         "per_page": per_page,
     })
+
+
+async def admin_houses_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, castle FROM houses ORDER BY name"
+        )
+    return web.json_response({"ok": True, "houses": [dict(row) for row in rows]})
+
+
+async def admin_assign_house_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        raw_house_id = data.get("house_id")
+        house_id = int(raw_house_id) if raw_house_id not in (None, "") else None
+    except (ValueError, TypeError):
+        return json_error("invalid_house_assignment")
+
+    async with request.app["db"].acquire() as conn:
+        if house_id is not None:
+            exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM houses WHERE id = $1)",
+                house_id,
+            )
+            if not exists:
+                return json_error("house_not_found", 404)
+        row = await conn.fetchrow(
+            """
+            UPDATE players SET house_id = $1
+            WHERE id = $2
+            RETURNING id, username, house_id
+            """,
+            house_id, player_id,
+        )
+    if not row:
+        return json_error("player_not_found", 404)
+    return web.json_response({"ok": True, "player": dict(row)})
 
 
 async def admin_add_player_handler(request):
@@ -349,10 +541,11 @@ async def mail_players_handler(request):
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, username, house_id
-            FROM players
-            WHERE is_active = TRUE AND id <> $1
-            ORDER BY username, id
+            SELECT p.id, p.username, p.house_id, h.name AS house_name
+            FROM players p
+            LEFT JOIN houses h ON h.id = p.house_id
+            WHERE p.is_active = TRUE AND p.id <> $1
+            ORDER BY p.username, p.id
             """,
             player["id"],
         )
@@ -464,6 +657,26 @@ async def on_startup(app):
     db_pool = app["db"]
     async with app["db"].acquire() as conn:
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS houses (
+                id BIGSERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                sigil TEXT,
+                castle VARCHAR(150),
+                treasury BIGINT NOT NULL DEFAULT 0,
+                food BIGINT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        for house_name, castle_name in HOUSE_SEEDS:
+            await conn.execute(
+                """
+                INSERT INTO houses (name, castle)
+                VALUES ($1, $2)
+                ON CONFLICT (name) DO NOTHING
+                """,
+                house_name, castle_name,
+            )
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
                 id BIGSERIAL PRIMARY KEY,
                 sender_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -498,6 +711,8 @@ def create_app():
     app.router.add_get("/api/me", me_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
+    app.router.add_get("/api/admin/houses", admin_houses_handler)
+    app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
