@@ -141,6 +141,16 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
       p.house_id=result.player.house_id;p.house_name=chosen?chosen.name:null;
      }catch(e){status.textContent='خطا: '+e.message;select.value=p.house_id?String(p.house_id):'';}
     };
+    const castleSelect=document.createElement('select');castleSelect.setAttribute('aria-label','قلعه '+(p.username||'بازیکن'));
+    castleSelect.add(new Option('بدون قلعه',''));
+    [...new Set(h.houses.map(x=>x.castle).filter(Boolean))].sort().forEach(c=>castleSelect.add(new Option(c,c)));
+    castleSelect.value=p.castle_name||'';
+    const castleStatus=document.createElement('small');castleStatus.className='house-save-status';castleStatus.textContent='محل سکونت: '+(p.castle_name||'ثبت‌نشده');
+    castleSelect.onchange=async()=>{
+     castleStatus.textContent='در حال ذخیره قلعه…';
+     try{const result=await api('/api/admin/players/'+p.id+'/castle',{method:'PUT',body:JSON.stringify({castle_name:castleSelect.value||null})});p.castle_name=result.player.castle_name;castleStatus.textContent='محل سکونت: '+(p.castle_name||'ثبت‌نشده');}
+     catch(e){castleStatus.textContent='خطا: '+e.message;castleSelect.value=p.castle_name||'';}
+    };
     const roleSelect=document.createElement('select');roleSelect.setAttribute('aria-label','نقش '+(p.username||'بازیکن'));
     [['player','بازیکن'],['house_leader','رهبر خاندان'],['treasurer','خزانه‌دار']].forEach(([v,label])=>roleSelect.add(new Option(label,v)));
     roleSelect.value=p.role||'player';
@@ -174,7 +184,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
      catch(e){activeStatus.textContent='خطا: '+e.message;}
      finally{activeBtn.disabled=!!p.is_super_admin;}
     };
-    row.append(n,i,select,status,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
+    row.append(n,i,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
