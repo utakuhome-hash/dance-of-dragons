@@ -98,7 +98,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    mast.style.height='auto';mast.style.minHeight='66px';mast.style.flexWrap='wrap';
   }
   const frame=document.getElementById('view');
-  window.dodCurrentPlayer=player;if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:'dod-account',player:{username:player.username||'بازیکن',house_id:player.house_id||null,house_name:player.house_name||null,castle_name:player.castle_name||null}},'*');
+  window.dodCurrentPlayer=player;showPage('dashboard');if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:'dod-account',player:{username:player.username||'بازیکن',house_id:player.house_id||null,house_name:player.house_name||null,castle_name:player.castle_name||null}},'*');
  }
  async function login(){
   retry.hidden=true;msg.textContent='در حال بررسی هویت تلگرام…';
