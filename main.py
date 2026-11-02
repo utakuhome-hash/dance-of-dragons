@@ -971,7 +971,38 @@ async def on_startup(app):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        # Bootstrap the player tables on a brand-new database before any queries use them.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS players (
+                id BIGSERIAL PRIMARY KEY,
+                username VARCHAR(50) NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL DEFAULT '',
+                telegram_id BIGINT UNIQUE,
+                role VARCHAR(30) NOT NULL DEFAULT 'player',
+                house_id BIGINT REFERENCES houses(id),
+                castle_name VARCHAR(150),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                is_super_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                telegram_auth_date BIGINT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CHECK (role IN ('admin', 'player', 'house_leader', 'treasurer'))
+            )
+        """)
         await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS castle_name VARCHAR(150)")
+        await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE")
+        await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS telegram_auth_date BIGINT")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS player_sessions (
+                id BIGSERIAL PRIMARY KEY,
+                player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                session_token_hash TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                revoked_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
+
         for house_name, castle_name in HOUSE_SEEDS:
             await conn.execute(
                 """
