@@ -417,6 +417,186 @@ async def auth_handler(request):
     })
 
 
+async def family_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return web.json_response({"ok": True, "house": None, "members": [], "candidates": [], "can_manage": False})
+    async with request.app["db"].acquire() as conn:
+        house = await conn.fetchrow("SELECT id, name, castle, sigil FROM houses WHERE id = $1", player["house_id"])
+        members = await conn.fetch("""
+            SELECT id, username, role FROM players
+            WHERE house_id = $1 AND is_active = TRUE
+            ORDER BY CASE WHEN role = 'house_leader' THEN 0 ELSE 1 END, username
+        """, player["house_id"])
+        candidates = await conn.fetch("""
+            SELECT p.id, p.username, h.name AS house_name FROM players p
+            LEFT JOIN houses h ON h.id = p.house_id
+            WHERE p.is_active = TRUE AND p.house_id IS DISTINCT FROM $1
+            ORDER BY p.username
+        """, player["house_id"])
+    can_manage = player["role"] == "house_leader" or (
+        player["role"] == "admin" and player.get("is_super_admin")
+        and int(player["id"]) == SUPER_ADMIN_ID
+    )
+    return web.json_response({
+        "ok": True, "house": dict(house) if house else None,
+        "members": [dict(row) for row in members],
+        "candidates": [dict(row) for row in candidates] if can_manage else [],
+        "can_manage": can_manage, "current_player_id": player["id"],
+    })
+
+
+async def family_add_member_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    can_manage = player["role"] == "house_leader" or (
+        player["role"] == "admin" and player.get("is_super_admin")
+        and int(player["id"]) == SUPER_ADMIN_ID
+    )
+    if not can_manage or not player.get("house_id"):
+        return json_error("forbidden", 403)
+    try:
+        target_id = int(request.match_info["player_id"])
+    except (ValueError, TypeError):
+        return json_error("invalid_player_id")
+    async with request.app["db"].acquire() as conn:
+        target = await conn.fetchrow("SELECT id, is_active, is_super_admin FROM players WHERE id = $1", target_id)
+        if not target or not target["is_active"]:
+            return json_error("player_not_found", 404)
+        if target["is_super_admin"]:
+            return json_error("protected_account", 403)
+        await conn.execute("UPDATE players SET house_id = $1 WHERE id = $2", player["house_id"], target_id)
+    return web.json_response({"ok": True, "message": "member_assigned"})
+
+
+async def family_remove_member_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    can_manage = player["role"] == "house_leader" or (
+        player["role"] == "admin" and player.get("is_super_admin")
+        and int(player["id"]) == SUPER_ADMIN_ID
+    )
+    if not can_manage or not player.get("house_id"):
+        return json_error("forbidden", 403)
+    try:
+        target_id = int(request.match_info["player_id"])
+    except (ValueError, TypeError):
+        return json_error("invalid_player_id")
+    if target_id == int(player["id"]):
+        return json_error("cannot_remove_self", 400)
+    async with request.app["db"].acquire() as conn:
+        result = await conn.execute("""
+            UPDATE players SET house_id = NULL
+            WHERE id = $1 AND house_id = $2 AND is_super_admin = FALSE
+        """, target_id, player["house_id"])
+    if result.endswith(" 0"):
+        return json_error("member_not_found", 404)
+    return web.json_response({"ok": True, "message": "member_removed"})
+
+
+async def admin_update_player_telegram_id_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        raw_id = str(data.get("telegram_id", "")).strip()
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    if not raw_id.isdigit():
+        return json_error("invalid_telegram_id")
+    telegram_id = int(raw_id)
+    if telegram_id <= 0 or telegram_id > 9223372036854775807:
+        return json_error("invalid_telegram_id")
+    try:
+        async with request.app["db"].acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(739201847)")
+                target = await conn.fetchrow(
+                    "SELECT id, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                    player_id,
+                )
+                if not target:
+                    return json_error("player_not_found", 404)
+                if target["is_super_admin"] and player_id != int(admin["id"]):
+                    return json_error("protected_account", 403)
+                updated = await conn.fetchrow(
+                    "UPDATE players SET telegram_id = $1 WHERE id = $2 RETURNING id, username, telegram_id",
+                    telegram_id, player_id,
+                )
+        return web.json_response({"ok": True, "player": dict(updated)})
+    except asyncpg.UniqueViolationError:
+        return json_error("telegram_id_exists", 409)
+
+
+async def admin_set_player_active_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        active = data.get("is_active")
+        if not isinstance(active, bool):
+            return json_error("invalid_active_status")
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    if player_id == int(admin["id"]) and not active:
+        return json_error("cannot_ban_self", 400)
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                "SELECT id, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                player_id,
+            )
+            if not target:
+                return json_error("player_not_found", 404)
+            if target["is_super_admin"]:
+                return json_error("protected_account", 403)
+            await conn.execute(
+                "UPDATE players SET is_active = $1 WHERE id = $2",
+                active, player_id,
+            )
+            if not active:
+                await conn.execute(
+                    "UPDATE player_sessions SET revoked_at = NOW() WHERE player_id = $1 AND revoked_at IS NULL",
+                    player_id,
+                )
+    return web.json_response({"ok": True, "is_active": active})
+
+
+async def admin_update_player_role_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        target_id = int(request.match_info["player_id"])
+        data = await request.json()
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    role = str(data.get("role", "")).strip()
+    if role not in ("player", "house_leader", "treasurer", "admin"):
+        return json_error("invalid_role")
+    async with request.app["db"].acquire() as conn:
+        target = await conn.fetchrow("SELECT id, is_super_admin FROM players WHERE id = $1", target_id)
+        if not target:
+            return json_error("player_not_found", 404)
+        if target["is_super_admin"] and role != "admin":
+            return json_error("protected_account", 403)
+        if role == "admin" and not target["is_super_admin"]:
+            return json_error("admin_role_restricted", 403)
+        updated = await conn.fetchrow(
+            "UPDATE players SET role = $1 WHERE id = $2 RETURNING id, username, role",
+            role, target_id,
+        )
+    return web.json_response({"ok": True, "player": dict(updated)})
+
+
 async def me_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -749,6 +929,16 @@ async def on_startup(app):
                 """,
                 house_name, castle_name,
             )
+        # Ensure the super-admin account has the Targaryen house by default.
+        # This only fills an empty assignment; an explicit admin choice is preserved.
+        await conn.execute(
+            """
+            UPDATE players
+            SET house_id = (SELECT id FROM houses WHERE name = 'تارگرین')
+            WHERE id = $1 AND house_id IS NULL
+            """,
+            SUPER_ADMIN_ID,
+        )
         for telegram_id, house_name in PLAYER_HOUSE_ASSIGNMENTS:
             await conn.execute(
                 """
@@ -791,6 +981,12 @@ def create_app():
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
+    app.router.add_get("/api/family", family_handler)
+    app.router.add_post("/api/family/members/{player_id}", family_add_member_handler)
+    app.router.add_delete("/api/family/members/{player_id}", family_remove_member_handler)
+    app.router.add_put("/api/admin/players/{player_id}/role", admin_update_player_role_handler)
+    app.router.add_put("/api/admin/players/{player_id}/telegram-id", admin_update_player_telegram_id_handler)
+    app.router.add_put("/api/admin/players/{player_id}/active", admin_set_player_active_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
