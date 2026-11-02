@@ -548,6 +548,78 @@ async def admin_assign_house_handler(request):
     return web.json_response({"ok": True, "player": dict(row)})
 
 
+
+async def house_dashboard_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player["house_id"]:
+        return json_error("house_not_assigned", 403)
+    async with request.app["db"].acquire() as conn:
+        house = await conn.fetchrow("SELECT id, name, castle, treasury, food FROM houses WHERE id = $1", player["house_id"])
+        members = await conn.fetch("""
+            SELECT p.id, p.username, p.role, d.duty, d.updated_at
+            FROM players p LEFT JOIN house_member_duties d ON d.player_id = p.id AND d.house_id = p.house_id
+            WHERE p.house_id = $1 AND p.is_active = TRUE
+            ORDER BY CASE WHEN p.role = 'house_leader' THEN 0 ELSE 1 END, p.username, p.id
+        """, player["house_id"])
+    return web.json_response({"ok": True, "house": dict(house) if house else None,
+        "members": [{**dict(row), "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None} for row in members],
+        "can_assign_duties": player["role"] == "house_leader", "current_player_id": player["id"]})
+
+
+async def house_assign_duty_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if player["role"] != "house_leader":
+        return json_error("leader_only", 403)
+    if not player["house_id"]:
+        return json_error("house_not_assigned", 403)
+    try:
+        target_id = int(request.match_info["player_id"])
+        data = await request.json()
+    except (ValueError, TypeError):
+        return json_error("invalid_duty")
+    duty = str(data.get("duty", "")).strip()
+    allowed = {"فرمانده نظامی", "خزانه‌دار", "مسئول دیپلماسی", "مسئول تدارکات", "مسئول ساخت‌وساز", "مشاور خاندان", "بدون وظیفه"}
+    if duty not in allowed:
+        return json_error("invalid_duty")
+    async with request.app["db"].acquire() as conn:
+        target = await conn.fetchrow("SELECT id FROM players WHERE id = $1 AND house_id = $2 AND is_active = TRUE", target_id, player["house_id"])
+        if not target:
+            return json_error("member_not_found", 404)
+        if duty == "بدون وظیفه":
+            await conn.execute("DELETE FROM house_member_duties WHERE player_id = $1 AND house_id = $2", target_id, player["house_id"])
+        else:
+            await conn.execute("""
+                INSERT INTO house_member_duties (house_id, player_id, duty, assigned_by, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (player_id) DO UPDATE SET house_id = EXCLUDED.house_id, duty = EXCLUDED.duty,
+                    assigned_by = EXCLUDED.assigned_by, updated_at = NOW()
+            """, player["house_id"], target_id, duty, player["id"])
+    return web.json_response({"ok": True, "player_id": target_id, "duty": duty})
+
+
+async def admin_player_role_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        role = str(data.get("role", "player"))
+    except (ValueError, TypeError):
+        return json_error("invalid_role")
+    if role not in {"player", "house_leader", "treasurer"}:
+        return json_error("invalid_role")
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow("UPDATE players SET role = $1 WHERE id = $2 AND house_id IS NOT NULL RETURNING id, username, role, house_id", role, player_id)
+    if not row:
+        return json_error("player_not_found_or_no_house", 404)
+    return web.json_response({"ok": True, "player": dict(row)})
+
+
 async def admin_add_player_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -793,7 +865,7 @@ def create_app():
     app.router.add_get("/api/me", me_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
-    app.router.add_get("/api/admin/houses", admin_houses_handler)
+    app.router.add_get("/api/admin/houses", admin_houses_handler)\n    app.router.add_put("/api/admin/players/{player_id}/role", admin_player_role_handler)\n    app.router.add_get("/api/house/dashboard", house_dashboard_handler)\n    app.router.add_put("/api/house/members/{player_id}/duty", house_assign_duty_handler)
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
