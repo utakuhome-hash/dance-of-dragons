@@ -498,6 +498,78 @@ async def family_remove_member_handler(request):
     return web.json_response({"ok": True, "message": "member_removed"})
 
 
+async def admin_update_player_telegram_id_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        raw_id = str(data.get("telegram_id", "")).strip()
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    if not raw_id.isdigit():
+        return json_error("invalid_telegram_id")
+    telegram_id = int(raw_id)
+    if telegram_id <= 0 or telegram_id > 9223372036854775807:
+        return json_error("invalid_telegram_id")
+    try:
+        async with request.app["db"].acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(739201847)")
+                target = await conn.fetchrow(
+                    "SELECT id, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                    player_id,
+                )
+                if not target:
+                    return json_error("player_not_found", 404)
+                if target["is_super_admin"] and player_id != int(admin["id"]):
+                    return json_error("protected_account", 403)
+                updated = await conn.fetchrow(
+                    "UPDATE players SET telegram_id = $1 WHERE id = $2 RETURNING id, username, telegram_id",
+                    telegram_id, player_id,
+                )
+        return web.json_response({"ok": True, "player": dict(updated)})
+    except asyncpg.UniqueViolationError:
+        return json_error("telegram_id_exists", 409)
+
+
+async def admin_set_player_active_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        active = data.get("is_active")
+        if not isinstance(active, bool):
+            return json_error("invalid_active_status")
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    if player_id == int(admin["id"]) and not active:
+        return json_error("cannot_ban_self", 400)
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                "SELECT id, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                player_id,
+            )
+            if not target:
+                return json_error("player_not_found", 404)
+            if target["is_super_admin"]:
+                return json_error("protected_account", 403)
+            await conn.execute(
+                "UPDATE players SET is_active = $1 WHERE id = $2",
+                active, player_id,
+            )
+            if not active:
+                await conn.execute(
+                    "UPDATE player_sessions SET revoked_at = NOW() WHERE player_id = $1 AND revoked_at IS NULL",
+                    player_id,
+                )
+    return web.json_response({"ok": True, "is_active": active})
+
+
 async def admin_update_player_role_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -903,6 +975,8 @@ def create_app():
     app.router.add_post("/api/family/members/{player_id}", family_add_member_handler)
     app.router.add_delete("/api/family/members/{player_id}", family_remove_member_handler)
     app.router.add_put("/api/admin/players/{player_id}/role", admin_update_player_role_handler)
+    app.router.add_put("/api/admin/players/{player_id}/telegram-id", admin_update_player_telegram_id_handler)
+    app.router.add_put("/api/admin/players/{player_id}/active", admin_set_player_active_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
