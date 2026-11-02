@@ -23,9 +23,6 @@ WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
 BASE_DIR = Path(__file__).resolve().parent
 WEBAPP_FILE = BASE_DIR / "static" / "index.html"
 
-# This is the players.id value of the existing super-admin account.
-SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "1"))
-
 HOUSE_SEEDS = [
     [
         "استارک",
