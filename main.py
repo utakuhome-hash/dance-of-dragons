@@ -614,9 +614,22 @@ async def admin_player_role_handler(request):
     if role not in {"player", "house_leader", "treasurer"}:
         return json_error("invalid_role")
     async with request.app["db"].acquire() as conn:
-        row = await conn.fetchrow("UPDATE players SET role = $1 WHERE id = $2 AND house_id IS NOT NULL RETURNING id, username, role, house_id", role, player_id)
-    if not row:
-        return json_error("player_not_found_or_no_house", 404)
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                "SELECT id, house_id FROM players WHERE id = $1 AND house_id IS NOT NULL FOR UPDATE",
+                player_id,
+            )
+            if not target:
+                return json_error("player_not_found_or_no_house", 404)
+            if role == "house_leader":
+                await conn.execute(
+                    "UPDATE players SET role = 'player' WHERE house_id = $1 AND role = 'house_leader' AND id <> $2",
+                    target["house_id"], player_id,
+                )
+            row = await conn.fetchrow(
+                "UPDATE players SET role = $1 WHERE id = $2 RETURNING id, username, role, house_id",
+                role, player_id,
+            )
     return web.json_response({"ok": True, "player": dict(row)})
 
 
