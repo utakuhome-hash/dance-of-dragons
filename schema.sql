@@ -19,6 +19,7 @@ CREATE TABLE players (
     telegram_id BIGINT UNIQUE,
     role VARCHAR(30) NOT NULL DEFAULT 'player',
     house_id BIGINT REFERENCES houses(id),
+    castle_name VARCHAR(150),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
