@@ -210,7 +210,7 @@ PLAYER_HOUSE_ASSIGNMENTS = [
     (1214060391, "تایرل"),
     (5269911726, "های‌تاور"),
     (8605396069, "تارلی"),
-    (7650983591, "تارگرین"),
+    (7650983591, "ولاریون"),
     (5632444639, "تارگرین"),
     (6751495290, "ولاریون"),
     (8897601678, "تارگرین"),
@@ -227,6 +227,9 @@ PLAYER_HOUSE_ASSIGNMENTS = [
     (6283332805, "کوربری"),
     (8821942455, "آرین"),
     (8537207185, "کارگیل"),
+    (82773653, "تارگرین"),
+    (6552600701, "های‌تاور"),
+    (1679850486, "تارگرین"),
 ]
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -325,7 +328,7 @@ async def get_authenticated_player(request):
     async with request.app["db"].acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
                    h.name AS house_name, p.is_active, p.is_super_admin
             FROM player_sessions s
             JOIN players p ON p.id = s.player_id
@@ -367,7 +370,7 @@ async def auth_handler(request):
     async with request.app["db"].acquire() as conn:
         player = await conn.fetchrow(
             """
-            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
                    h.name AS house_name, p.is_active, p.is_super_admin
             FROM players p
             LEFT JOIN houses h ON h.id = p.house_id
@@ -406,10 +409,33 @@ async def auth_handler(request):
             "telegram_id": player["telegram_id"],
             "role": player["role"],
             "house_id": player["house_id"],
+            "castle_name": player["castle_name"],
             "house_name": player["house_name"],
             "is_active": player["is_active"],
             "is_super_admin": player["is_super_admin"],
         }
+    })
+
+
+async def castle_members_handler(request):
+    castle_name = request.match_info["castle_name"].strip()
+    if not castle_name or len(castle_name) > 150:
+        return json_error("invalid_castle_name")
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT p.username, h.name AS house_name
+            FROM players p
+            LEFT JOIN houses h ON h.id = p.house_id
+            WHERE p.is_active = TRUE AND p.castle_name = $1
+            ORDER BY p.username
+            """,
+            castle_name,
+        )
+    return web.json_response({
+        "ok": True,
+        "castle": castle_name,
+        "members": [dict(row) for row in rows],
     })
 
 
@@ -913,6 +939,7 @@ async def on_startup(app):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS castle_name VARCHAR(150)")
         for house_name, castle_name in HOUSE_SEEDS:
             await conn.execute(
                 """
@@ -940,6 +967,21 @@ async def on_startup(app):
                 WHERE telegram_id = $1
                 """,
                 telegram_id, house_name,
+            )
+        castle_assignments = [
+            (7650983591, "دراگون‌استون"),
+            (5632444639, "دراگون‌استون"),
+            (8897601678, "دراگون‌استون"),
+            (8845823478, "دراگون‌استون"),
+            (7551277757, "دراگون‌استون"),
+            (82773653, "اولدتاون"),
+            (6552600701, "کینگزلندینگ"),
+            (1679850486, "کینگزلندینگ"),
+        ]
+        for telegram_id, castle_name in castle_assignments:
+            await conn.execute(
+                "UPDATE players SET castle_name = $2 WHERE telegram_id = $1",
+                telegram_id, castle_name,
             )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
@@ -975,6 +1017,7 @@ def create_app():
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
     app.router.add_get("/api/family", family_handler)
+    app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
     app.router.add_post("/api/family/members/{player_id}", family_add_member_handler)
     app.router.add_delete("/api/family/members/{player_id}", family_remove_member_handler)
     app.router.add_put("/api/admin/players/{player_id}/role", admin_update_player_role_handler)
