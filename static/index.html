@@ -140,7 +140,17 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
       p.house_id=result.player.house_id;p.house_name=chosen?chosen.name:null;
      }catch(e){status.textContent='خطا: '+e.message;select.value=p.house_id?String(p.house_id):'';}
     };
-    row.append(n,i,select,status);list.append(row);
+    const roleSelect=document.createElement('select');roleSelect.setAttribute('aria-label','نقش '+(p.username||'بازیکن'));
+    [['player','بازیکن'],['house_leader','رهبر خاندان'],['treasurer','خزانه‌دار']].forEach(([v,label])=>roleSelect.add(new Option(label,v)));
+    roleSelect.value=p.role||'player';
+    const roleStatus=document.createElement('small');roleStatus.className='house-save-status';roleStatus.textContent='نقش';
+    roleSelect.onchange=async()=>{
+     roleStatus.textContent='در حال ذخیره نقش…';
+     try{const result=await api('/api/admin/players/'+p.id+'/role',{method:'PUT',body:JSON.stringify({role:roleSelect.value})});p.role=result.player.role;roleStatus.textContent='نقش ذخیره شد.';}
+     catch(e){roleStatus.textContent='خطا: '+e.message;roleSelect.value=p.role||'player';}
+    };
+    if(p.is_super_admin){roleSelect.disabled=true;}
+    row.append(n,i,select,status,roleSelect,roleStatus);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
