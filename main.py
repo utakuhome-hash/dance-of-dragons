@@ -1003,6 +1003,19 @@ async def on_startup(app):
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
 
+        # Provision the explicitly configured owner account as super-admin.
+        super_admin_telegram_id = os.getenv("SUPER_ADMIN_TELEGRAM_ID", "").strip()
+        if super_admin_telegram_id.isdigit() and int(super_admin_telegram_id) > 0:
+            await conn.execute(
+                """
+                INSERT INTO players (username, telegram_id, role, is_active, is_super_admin)
+                VALUES ($1, $2, 'admin', TRUE, TRUE)
+                ON CONFLICT (telegram_id) DO UPDATE
+                SET role = 'admin', is_active = TRUE, is_super_admin = TRUE
+                """,
+                f"superadmin_{super_admin_telegram_id}", int(super_admin_telegram_id),
+            )
+
         for house_name, castle_name in HOUSE_SEEDS:
             await conn.execute(
                 """
