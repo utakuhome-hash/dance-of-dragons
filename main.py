@@ -574,7 +574,14 @@ async def mail_list_handler(request):
             """,
             box, player["id"],
         )
-    return web.json_response({"ok": True, "letters": [dict(row) for row in rows]})
+    letters = []
+    for row in rows:
+        letter = dict(row)
+        for field in ("created_at", "read_at"):
+            if letter.get(field) is not None:
+                letter[field] = letter[field].isoformat()
+        letters.append(letter)
+    return web.json_response({"ok": True, "letters": letters})
 
 
 async def mail_send_handler(request):
@@ -617,7 +624,10 @@ async def mail_send_handler(request):
             """,
             player["id"], recipient_id, subject, body, category,
         )
-    return web.json_response({"ok": True, "letter": dict(row)}, status=201)
+    letter = dict(row)
+    if letter.get("created_at") is not None:
+        letter["created_at"] = letter["created_at"].isoformat()
+    return web.json_response({"ok": True, "letter": letter}, status=201)
 
 
 async def mail_read_handler(request):
