@@ -548,6 +548,70 @@ async def admin_assign_house_handler(request):
     return web.json_response({"ok": True, "player": dict(row)})
 
 
+async def admin_update_player_account_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    raw_telegram_id = data.get("telegram_id")
+    active_value = data.get("is_active")
+    if raw_telegram_id is None and active_value is None:
+        return json_error("no_changes")
+    telegram_id = None
+    if raw_telegram_id is not None:
+        raw_telegram_id = str(raw_telegram_id).strip()
+        if not raw_telegram_id.isdigit():
+            return json_error("invalid_telegram_id")
+        telegram_id = int(raw_telegram_id)
+        if telegram_id <= 0 or telegram_id > 9223372036854775807:
+            return json_error("invalid_telegram_id")
+    if active_value is not None and not isinstance(active_value, bool):
+        return json_error("invalid_active_status")
+    try:
+        async with request.app["db"].acquire() as conn:
+            async with conn.transaction():
+                target = await conn.fetchrow(
+                    "SELECT id, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                    player_id,
+                )
+                if not target:
+                    return json_error("player_not_found", 404)
+                if target["is_super_admin"] or player_id == SUPER_ADMIN_ID:
+                    return json_error("protected_account", 403)
+                if telegram_id is not None:
+                    duplicate = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM players WHERE telegram_id = $1 AND id <> $2)",
+                        telegram_id, player_id,
+                    )
+                    if duplicate:
+                        return json_error("telegram_id_exists", 409)
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE players
+                    SET telegram_id = COALESCE($1, telegram_id),
+                        is_active = COALESCE($2, is_active)
+                    WHERE id = $3
+                    RETURNING id, username, telegram_id, is_active
+                    """,
+                    telegram_id, active_value, player_id,
+                )
+                if telegram_id is not None or active_value is False:
+                    await conn.execute(
+                        """
+                        UPDATE player_sessions SET revoked_at = NOW()
+                        WHERE player_id = $1 AND revoked_at IS NULL
+                        """,
+                        player_id,
+                    )
+        return web.json_response({"ok": True, "player": dict(updated)})
+    except asyncpg.UniqueViolationError:
+        return json_error("telegram_id_exists", 409)
+
+
 async def admin_add_player_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -795,6 +859,7 @@ def create_app():
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
+    app.router.add_put("/api/admin/players/{player_id}/account", admin_update_player_account_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
