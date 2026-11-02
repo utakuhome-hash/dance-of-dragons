@@ -831,6 +831,15 @@ async def on_startup(app):
                 telegram_id, house_name,
             )
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS house_member_duties (
+                player_id BIGINT PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+                house_id BIGINT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+                duty VARCHAR(80) NOT NULL,
+                assigned_by BIGINT REFERENCES players(id),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
                 id BIGSERIAL PRIMARY KEY,
                 sender_player_id BIGINT NOT NULL REFERENCES players(id),
