@@ -666,7 +666,7 @@ async def admin_players_handler(request):
             )
             rows = await conn.fetch(
                 """
-                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
                        h.name AS house_name, p.is_active, p.is_super_admin
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
@@ -714,6 +714,36 @@ async def admin_houses_handler(request):
     return web.json_response({"ok": True, "houses": [dict(row) for row in rows]})
 
 
+async def admin_assign_castle_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+        data = await request.json()
+        raw_castle = data.get("castle_name")
+        castle_name = str(raw_castle).strip() if raw_castle not in (None, "") else None
+    except (ValueError, TypeError):
+        return json_error("invalid_castle_assignment")
+    if castle_name is not None and len(castle_name) > 150:
+        return json_error("invalid_castle_name")
+    async with request.app["db"].acquire() as conn:
+        if castle_name is not None:
+            exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM houses WHERE castle = $1)",
+                castle_name,
+            )
+            if not exists:
+                return json_error("castle_not_found", 404)
+        row = await conn.fetchrow(
+            "UPDATE players SET castle_name = $1 WHERE id = $2 RETURNING id, username, castle_name",
+            castle_name, player_id,
+        )
+    if not row:
+        return json_error("player_not_found", 404)
+    return web.json_response({"ok": True, "player": dict(row)})
+
+
 async def admin_assign_house_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -736,9 +766,11 @@ async def admin_assign_house_handler(request):
                 return json_error("house_not_found", 404)
         row = await conn.fetchrow(
             """
-            UPDATE players SET house_id = $1
-            WHERE id = $2
-            RETURNING id, username, house_id
+            UPDATE players p
+            SET house_id = $1,
+                castle_name = (SELECT castle FROM houses WHERE id = $1)
+            WHERE p.id = $2
+            RETURNING p.id, p.username, p.house_id, p.castle_name
             """,
             house_id, player_id,
         )
@@ -968,20 +1000,24 @@ async def on_startup(app):
                 """,
                 telegram_id, house_name,
             )
-        castle_assignments = [
-            (7650983591, "دراگون‌استون"),
-            (5632444639, "دراگون‌استون"),
-            (8897601678, "دراگون‌استون"),
-            (8845823478, "دراگون‌استون"),
-            (7551277757, "دراگون‌استون"),
-            (82773653, "اولدتاون"),
-            (6552600701, "کینگزلندینگ"),
-            (1679850486, "کینگزلندینگ"),
-        ]
-        for telegram_id, castle_name in castle_assignments:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                migration_key VARCHAR(150) PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        needs_castle_backfill = not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'castle-house-defaults-v1')"
+        )
+        if needs_castle_backfill:
+            await conn.execute("""
+                UPDATE players p
+                SET castle_name = h.castle
+                FROM houses h
+                WHERE p.house_id = h.id
+            """)
             await conn.execute(
-                "UPDATE players SET castle_name = $2 WHERE telegram_id = $1",
-                telegram_id, castle_name,
+                "INSERT INTO app_migrations (migration_key) VALUES ('castle-house-defaults-v1') ON CONFLICT DO NOTHING"
             )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
@@ -1027,6 +1063,7 @@ def create_app():
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
+    app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
