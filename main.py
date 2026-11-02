@@ -929,6 +929,16 @@ async def on_startup(app):
                 """,
                 house_name, castle_name,
             )
+        # Ensure the super-admin account has the Targaryen house by default.
+        # This only fills an empty assignment; an explicit admin choice is preserved.
+        await conn.execute(
+            """
+            UPDATE players
+            SET house_id = (SELECT id FROM houses WHERE name = 'تارگرین')
+            WHERE id = $1 AND house_id IS NULL
+            """,
+            SUPER_ADMIN_ID,
+        )
         for telegram_id, house_name in PLAYER_HOUSE_ASSIGNMENTS:
             await conn.execute(
                 """
