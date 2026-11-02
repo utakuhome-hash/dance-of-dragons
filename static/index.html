@@ -125,7 +125,8 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    d.players.forEach(p=>{
     const row=document.createElement('div');row.className='player-row';
     const n=document.createElement('span');n.textContent=p.username||'بدون نام';
-    const i=document.createElement('small');i.textContent=String(p.telegram_id||'');
+    const idInput=document.createElement('input');idInput.type='text';idInput.inputMode='numeric';idInput.value=String(p.telegram_id||'');idInput.setAttribute('aria-label','Telegram ID برای '+(p.username||'بازیکن'));idInput.style.cssText='width:132px;padding:7px;border:1px solid #78603c;border-radius:8px;background:#100e0c;color:#fff;font:12px Tahoma';
+    const saveId=document.createElement('button');saveId.type='button';saveId.textContent='ذخیره ID';saveId.style.cssText='padding:7px 9px;border:1px solid #94713e;border-radius:8px;background:#382b1c;color:#ffe8b3;font:11px Tahoma';
     const select=document.createElement('select');select.setAttribute('aria-label','خاندان '+(p.username||'بازیکن'));
     select.add(new Option('انتخاب خاندان',''));
     h.houses.forEach(x=>select.add(new Option(x.name+' · '+(x.castle||'بدون قلعه'),String(x.id))));
@@ -140,7 +141,25 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
       p.house_id=result.player.house_id;p.house_name=chosen?chosen.name:null;
      }catch(e){status.textContent='خطا: '+e.message;select.value=p.house_id?String(p.house_id):'';}
     };
-    row.append(n,i,select,status);list.append(row);
+    saveId.onclick=async()=>{
+     const nextId=idInput.value.trim();
+     if(!/^[0-9]+$/.test(nextId)||Number(nextId)<=0){status.textContent='شناسه عددی معتبر نیست.';return;}
+     if(nextId===String(p.telegram_id)){status.textContent='شناسه تغییری نکرده است.';return;}
+     if(!confirm('شناسه تلگرام این بازیکن تغییر کند؟ نشست‌های قبلی او خارج می‌شوند.'))return;
+     status.textContent='در حال ذخیره شناسه…';
+     try{const result=await api('/api/admin/players/'+p.id+'/account',{method:'PUT',body:JSON.stringify({telegram_id:nextId})});p.telegram_id=result.player.telegram_id;idInput.value=String(p.telegram_id);status.textContent='شناسه ذخیره شد؛ بازیکن باید با حساب تلگرام جدید وارد شود.';}
+     catch(e){const errors={telegram_id_exists:'این شناسه قبلاً ثبت شده است.',invalid_telegram_id:'شناسه تلگرام معتبر نیست.',protected_account:'حساب مدیر اصلی قابل تغییر نیست.'};status.textContent=errors[e.message]||e.message;}
+    };
+    const ban=document.createElement('button');ban.type='button';ban.textContent=p.is_active?'بن کردن':'رفع بن';ban.style.cssText='padding:7px 9px;border:1px solid #94713e;border-radius:8px;background:'+(p.is_active?'#4a211c':'#24432d')+';color:#ffe8b3;font:11px Tahoma';
+    ban.onclick=async()=>{
+     const next=!p.is_active;
+     if(!confirm(next?'این بازیکن فعال شود و از بن خارج شود؟':'این بازیکن بن شود و دسترسی‌اش قطع شود؟'))return;
+     status.textContent='در حال اعمال…';
+     try{const result=await api('/api/admin/players/'+p.id+'/account',{method:'PUT',body:JSON.stringify({is_active:next})});p.is_active=result.player.is_active;ban.textContent=p.is_active?'بن کردن':'رفع بن';ban.style.background=p.is_active?'#4a211c':'#24432d';status.textContent=p.is_active?'بازیکن فعال است.':'بازیکن بن شد؛ نشست‌های قبلی باطل شدند.';}
+     catch(e){status.textContent=e.message;}
+    };
+    if(p.is_super_admin){idInput.disabled=true;saveId.disabled=true;ban.disabled=true;select.disabled=true;status.textContent+=' · حساب محافظت‌شده';}
+    row.append(n,idInput,saveId,select,status,ban);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
