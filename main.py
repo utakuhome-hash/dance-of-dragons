@@ -166,9 +166,7 @@ HOUSE_SEEDS = [
     [
         "فاولر",
         "اسکای‌ریچ"
-    ]
-]
-
+    ],
     [
         "لارجنت",
         "نامشخص"
@@ -176,7 +174,8 @@ HOUSE_SEEDS = [
     [
         "کارگیل",
         "نامشخص"
-    ],
+    ]
+]
 
 
 # Existing Telegram accounts mapped to their canonical Westerosi houses.
