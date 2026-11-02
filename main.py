@@ -682,7 +682,7 @@ async def admin_players_handler(request):
             total = await conn.fetchval("SELECT COUNT(*) FROM players")
             rows = await conn.fetch(
                 """
-                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
                        h.name AS house_name, p.is_active, p.is_super_admin
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
