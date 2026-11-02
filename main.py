@@ -350,7 +350,6 @@ async def require_super_admin(request):
         not player["is_active"]
         or player["role"] != "admin"
         or not player["is_super_admin"]
-        or int(player["id"]) != SUPER_ADMIN_ID
     ):
         return None, json_error("forbidden", 403)
     return player, None
@@ -438,7 +437,6 @@ async def family_handler(request):
         """, player["house_id"])
     can_manage = player["role"] == "house_leader" or (
         player["role"] == "admin" and player.get("is_super_admin")
-        and int(player["id"]) == SUPER_ADMIN_ID
     )
     return web.json_response({
         "ok": True, "house": dict(house) if house else None,
@@ -454,7 +452,6 @@ async def family_add_member_handler(request):
         return json_error("unauthorized", 401)
     can_manage = player["role"] == "house_leader" or (
         player["role"] == "admin" and player.get("is_super_admin")
-        and int(player["id"]) == SUPER_ADMIN_ID
     )
     if not can_manage or not player.get("house_id"):
         return json_error("forbidden", 403)
@@ -478,7 +475,6 @@ async def family_remove_member_handler(request):
         return json_error("unauthorized", 401)
     can_manage = player["role"] == "house_leader" or (
         player["role"] == "admin" and player.get("is_super_admin")
-        and int(player["id"]) == SUPER_ADMIN_ID
     )
     if not can_manage or not player.get("house_id"):
         return json_error("forbidden", 403)
@@ -929,15 +925,15 @@ async def on_startup(app):
                 """,
                 house_name, castle_name,
             )
-        # Ensure the super-admin account has the Targaryen house by default.
-        # This only fills an empty assignment; an explicit admin choice is preserved.
+        # Give the flagged super-admin account a default house. This uses the
+        # database role flag as the source of truth rather than assuming its
+        # players.id is a particular value. Existing house choices are preserved.
         await conn.execute(
             """
             UPDATE players
             SET house_id = (SELECT id FROM houses WHERE name = 'تارگرین')
-            WHERE id = $1 AND house_id IS NULL
-            """,
-            SUPER_ADMIN_ID,
+            WHERE is_super_admin = TRUE AND role = 'admin' AND house_id IS NULL
+            """
         )
         for telegram_id, house_name in PLAYER_HOUSE_ASSIGNMENTS:
             await conn.execute(
