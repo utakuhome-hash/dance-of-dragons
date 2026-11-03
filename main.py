@@ -1628,6 +1628,33 @@ async def admin_update_profile_handler(request):
         return json_error("profile_not_found", 404)
     return web.json_response({"ok": True, "profile": dict(updated)})
 
+async def admin_assign_profile_owner_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        profile_id = int(request.match_info["profile_id"])
+        data = await request.json()
+        owner_raw = data.get("owner_player_id")
+        owner_id = int(owner_raw) if owner_raw not in (None, "") else None
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    async with request.app["db"].acquire() as conn:
+        if owner_id is not None and not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM players WHERE id = $1 AND is_active = TRUE)", owner_id
+        ):
+            return json_error("owner_not_found", 404)
+        updated = await conn.fetchrow("""
+            UPDATE character_profiles
+            SET owner_player_id = $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING id, character_name, owner_player_id
+        """, owner_id, profile_id)
+    if not updated:
+        return json_error("profile_not_found", 404)
+    return web.json_response({"ok": True, "profile": dict(updated)})
+
+
 async def index_handler(request):
     return web.FileResponse(WEBAPP_FILE)
 
@@ -1929,6 +1956,7 @@ def create_app():
     app.router.add_get("/api/profiles/public", public_profiles_list_handler)
     app.router.add_get("/api/profiles/{profile_id}", profile_detail_handler)
     app.router.add_put("/api/admin/profiles/{profile_id}", admin_update_profile_handler)
+    app.router.add_put("/api/admin/profiles/{profile_id}/owner", admin_assign_profile_owner_handler)
     app.router.add_get("/api/game-clock", game_clock_handler)
     app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
     app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
