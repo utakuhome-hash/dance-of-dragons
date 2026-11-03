@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 import time
 import hmac
@@ -9,6 +11,7 @@ from urllib.parse import parse_qsl, quote_plus
 import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -1082,7 +1085,24 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
-    await bot.set_webhook(WEBHOOK_URL)
+    try:
+        await bot.set_webhook(WEBHOOK_URL)
+    except TelegramRetryAfter as exc:
+        logging.warning(
+            "Telegram rate-limited setWebhook; retrying in %s seconds",
+            exc.retry_after,
+        )
+        await asyncio.sleep(exc.retry_after + 1)
+        try:
+            await bot.set_webhook(WEBHOOK_URL)
+        except Exception:
+            logging.exception(
+                "Could not set Telegram webhook after retry; web app will continue starting"
+            )
+    except Exception:
+        logging.exception(
+            "Could not set Telegram webhook; web app will continue starting"
+        )
 
 
 async def on_cleanup(app):
