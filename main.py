@@ -612,6 +612,162 @@ async def court_appointment_update_handler(request):
     })
 
 
+
+TRAVEL_CASTLE_ALIASES = {
+    "دراگون‌استون": ["دراگون‌استون", "دراگون استون", "Dragonstone", "Dragon Stone"],
+    "کینگزلندینگ": ["کینگزلندینگ", "کینگز لندینگ", "King's Landing", "King’s Landing", "Kings Landing"],
+    "اولدتاون": ["اولدتاون", "اولد تاون", "Oldtown", "Old Town"],
+    "دریفت‌مارک": ["دریفت‌مارک", "دریفت مارک", "Driftmark"],
+    "سلتگار": ["سلتگار", "کلاو آیل", "Claw Isle"],
+    "دارکلین": ["دارکلین", "دانسکندیل", "Duskendale"],
+    "ریوران": ["ریوران", "ریورران", "Riverrun"],
+    "استون‌هج": ["استون‌هج", "استون هج", "استون هِج", "Stone Hedge"],
+    "ریون‌تری‌هال": ["ریون‌تری‌هال", "ریون تری هال", "Raventree Hall"],
+    "تویینز": ["تویینز", "Twins", "The Twins"],
+    "وینترفل": ["وینترفل", "Winterfell"],
+    "لاست هرت": ["لاست هرت", "لست هرت", "Last Hearth"],
+    "کارهولد": ["کارهولد", "Karhold"],
+    "باروتون": ["باروتون", "Barrowton"],
+    "کسترلی‌راک": ["کسترلی‌راک", "کسترلی راک", "Casterly Rock"],
+    "کرکهال": ["کرکهال", "کراکهال", "Crakehall"],
+    "گلدن‌توس": ["گلدن‌توس", "گلدن توث", "Golden Tooth"],
+    "های‌گاردن": ["های‌گاردن", "های گاردن", "Highgarden"],
+    "هورن‌هیل": ["هورن‌هیل", "هورن هیل", "Horn Hill"],
+    "آربور": ["آربور", "Arbor", "The Arbor"],
+    "استورمزاند": ["استورمزاند", "استورمز اند", "Storm's End", "Storm’s End"],
+    "نایت‌سانگ": ["نایت‌سانگ", "نایت سونگ", "Nightsong"],
+    "قلعه سوان": ["قلعه سوان", "استون‌هلم", "Stonehelm", "House Swann"],
+    "قلعه فل": ["قلعه فل", "فل‌وود هال", "Felwood", "House Fell"],
+    "ایری": ["ایری", "Eyrie", "The Eyrie"],
+    "ران‌استون": ["ران‌استون", "ران استون", "Runestone"],
+    "هارتس‌هوم": ["هارتس‌هوم", "هارتس هوم", "Harte's Home", "Harte’s Home"],
+    "سان‌اسپیر": ["سان‌اسپیر", "سان اسپیر", "Sunspear"],
+    "یرنوود": ["یرنوود", "Yronwood"],
+    "اسکای‌ریچ": ["اسکای‌ریچ", "اسکای ریچ", "Skyreach"],
+    "گادزگریس": ["گادزگریس", "Godsgrace"],
+    "استارفال": ["استارفال", "Starfall"],
+    "پایک": ["پایک", "Pyke"],
+    "ده برج": ["ده برج", "Ten Towers"],
+    "بلک‌تاید": ["بلک‌تاید", "بلک تاید", "Blacktyde"],
+    "گریت‌ویک": ["گریت‌ویک", "گریت ویک", "Great Wyk"],
+}
+
+
+def canonical_travel_castle(value):
+    normalized = normalize_court_name(value)
+    for canonical, aliases in TRAVEL_CASTLE_ALIASES.items():
+        if normalized == normalize_court_name(canonical) or any(
+            normalized == normalize_court_name(alias) for alias in aliases
+        ):
+            return canonical
+    return None
+
+
+async def character_travel_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    requested_castle = str(request.query.get("castle_name") or "").strip()
+    castle = canonical_travel_castle(requested_castle)
+    if not castle:
+        return json_error("invalid_castle_name")
+    player_castle = canonical_travel_castle(player.get("castle_name"))
+    can_travel = bool(player.get("is_super_admin") or player_castle == castle)
+    if not can_travel:
+        return json_error("forbidden", 403)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT character_name, home_castle, current_castle, updated_at
+            FROM character_travels
+            WHERE current_castle = $1 AND home_castle <> current_castle
+            ORDER BY character_name
+            """,
+            castle,
+        )
+        away_rows = await conn.fetch(
+            """
+            SELECT character_name, home_castle, current_castle, updated_at
+            FROM character_travels
+            WHERE home_castle = $1 AND current_castle <> home_castle
+            ORDER BY character_name
+            """,
+            castle,
+        )
+    return web.json_response({
+        "ok": True,
+        "castle_name": castle,
+        "can_travel": can_travel,
+        "destinations": list(TRAVEL_CASTLE_ALIASES.keys()),
+        "guests": [
+            {
+                "character_name": row["character_name"],
+                "home_castle": row["home_castle"],
+                "current_castle": row["current_castle"],
+                "updated_at": row["updated_at"].isoformat(),
+            }
+            for row in rows
+        ],
+        "away": [
+            {
+                "character_name": row["character_name"],
+                "home_castle": row["home_castle"],
+                "current_castle": row["current_castle"],
+                "updated_at": row["updated_at"].isoformat(),
+            }
+            for row in away_rows
+        ],
+    })
+
+
+async def character_travel_update_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    try:
+        data = await request.json()
+    except Exception:
+        return json_error("invalid_json")
+    character_name = str(data.get("character_name") or "").strip()
+    home_castle = canonical_travel_castle(data.get("home_castle"))
+    destination = canonical_travel_castle(data.get("destination_castle"))
+    player_castle = canonical_travel_castle(player.get("castle_name"))
+    if not character_name or len(character_name) > 150 or not home_castle or not destination:
+        return json_error("invalid_travel")
+    if not player.get("is_super_admin") and player_castle != home_castle:
+        return json_error("forbidden", 403)
+    async with request.app["db"].acquire() as conn:
+        if destination == home_castle:
+            await conn.execute(
+                "DELETE FROM character_travels WHERE character_name = $1 AND home_castle = $2",
+                character_name, home_castle,
+            )
+            updated_at = None
+        else:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO character_travels
+                    (character_name, home_castle, current_castle, last_travel_by, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (character_name, home_castle)
+                DO UPDATE SET current_castle = EXCLUDED.current_castle,
+                              last_travel_by = EXCLUDED.last_travel_by,
+                              updated_at = NOW()
+                RETURNING updated_at
+                """,
+                character_name, home_castle, destination, player["id"],
+            )
+            updated_at = row["updated_at"].isoformat()
+    return web.json_response({
+        "ok": True,
+        "character_name": character_name,
+        "home_castle": home_castle,
+        "current_castle": destination,
+        "returned_home": destination == home_castle,
+        "updated_at": updated_at,
+    })
+
+
 async def family_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -1266,6 +1422,18 @@ async def on_startup(app):
                 PRIMARY KEY (castle_name, post_key)
             )
         """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS character_travels (
+                character_name VARCHAR(150) NOT NULL,
+                home_castle VARCHAR(150) NOT NULL,
+                current_castle VARCHAR(150) NOT NULL,
+                last_travel_by BIGINT REFERENCES players(id),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (character_name, home_castle)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS character_travels_current_idx ON character_travels (current_castle, updated_at DESC)")
     try:
         await bot.set_webhook(WEBHOOK_URL)
     except TelegramRetryAfter as exc:
@@ -1306,6 +1474,8 @@ def create_app():
     app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
     app.router.add_get("/api/court/appointments", court_appointments_handler)
     app.router.add_put("/api/court/appointments", court_appointment_update_handler)
+    app.router.add_get("/api/court/travel", character_travel_handler)
+    app.router.add_put("/api/court/travel", character_travel_update_handler)
     app.router.add_post("/api/family/members/{player_id}", family_add_member_handler)
     app.router.add_delete("/api/family/members/{player_id}", family_remove_member_handler)
     app.router.add_put("/api/admin/players/{player_id}/role", admin_update_player_role_handler)
