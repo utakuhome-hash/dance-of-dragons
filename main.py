@@ -1553,6 +1553,8 @@ async def profile_detail_handler(request):
             data.pop(key, None)
     data["skills"] = skills
     data["is_owner"] = owner_id == player["id"]
+    if is_admin:
+        data["owner_player_id"] = owner_id
     return web.json_response({"ok": True, "profile": data})
 
 
