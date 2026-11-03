@@ -1501,6 +1501,111 @@ async def admin_game_clock_pause_handler(request):
     return web.json_response({"ok": True, **clock})
 
 
+
+async def profiles_list_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    is_admin = bool(player.get("is_super_admin") and player.get("role") == "admin")
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, character_name, title, location, house, owner_player_id
+            FROM character_profiles ORDER BY character_name
+        """)
+        profiles = [dict(row) for row in rows]
+        players = []
+        if is_admin:
+            players = [dict(r) for r in await conn.fetch(
+                "SELECT id, username FROM players WHERE is_active = TRUE ORDER BY username"
+            )]
+    if not is_admin:
+        for profile in profiles:
+            profile.pop("owner_player_id", None)
+    return web.json_response({"ok": True, "profiles": profiles, "is_admin": is_admin, "players": players})
+
+
+async def profile_detail_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    try:
+        profile_id = int(request.match_info["profile_id"])
+    except (ValueError, TypeError):
+        return json_error("invalid_profile_id")
+    is_admin = bool(player.get("is_super_admin") and player.get("role") == "admin")
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, character_name, biography, age, health, title, location,
+                   spouse, children, dragon, house, owner_player_id,
+                   warfare, intelligence, diplomacy, management, faith
+            FROM character_profiles WHERE id = $1
+        """, profile_id)
+    if not row:
+        return json_error("profile_not_found", 404)
+    data = dict(row)
+    owner_id = data.pop("owner_player_id")
+    can_view_skills = is_admin or owner_id == player["id"]
+    skills = None
+    if can_view_skills:
+        skills = {key: data.pop(key) for key in ("warfare", "intelligence", "diplomacy", "management", "faith")}
+    else:
+        for key in ("warfare", "intelligence", "diplomacy", "management", "faith"):
+            data.pop(key, None)
+    data["skills"] = skills
+    data["is_owner"] = owner_id == player["id"]
+    return web.json_response({"ok": True, "profile": data})
+
+
+async def admin_update_profile_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        profile_id = int(request.match_info["profile_id"])
+        data = await request.json()
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    public_fields = ("biography", "age", "health", "title", "location", "spouse", "children", "dragon", "house")
+    values = {}
+    for key in public_fields:
+        value = data.get(key)
+        if value is not None:
+            value = str(value).strip()
+            if len(value) > (3000 if key == "biography" else 500):
+                return json_error("field_too_long")
+        values[key] = value or None
+    owner_raw = data.get("owner_player_id")
+    try:
+        owner_id = int(owner_raw) if owner_raw not in (None, "") else None
+    except (ValueError, TypeError):
+        return json_error("invalid_owner")
+    skill_data = data.get("skills") or {}
+    skill_values = []
+    for key in ("warfare", "intelligence", "diplomacy", "management", "faith"):
+        try:
+            value = int(skill_data[key])
+        except (KeyError, ValueError, TypeError):
+            return json_error("invalid_skill")
+        if value < 0 or value > 100:
+            return json_error("invalid_skill")
+        skill_values.append(value)
+    async with request.app["db"].acquire() as conn:
+        if owner_id is not None and not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM players WHERE id = $1 AND is_active = TRUE)", owner_id
+        ):
+            return json_error("owner_not_found", 404)
+        updated = await conn.fetchrow("""
+            UPDATE character_profiles SET
+                biography=$1, age=$2, health=$3, title=$4, location=$5,
+                spouse=$6, children=$7, dragon=$8, house=$9, owner_player_id=$10,
+                warfare=$11, intelligence=$12, diplomacy=$13, management=$14, faith=$15,
+                updated_at=NOW()
+            WHERE id=$16 RETURNING id, character_name
+        """, *(values[k] for k in public_fields), owner_id, *skill_values, profile_id)
+    if not updated:
+        return json_error("profile_not_found", 404)
+    return web.json_response({"ok": True, "profile": dict(updated)})
+
 async def index_handler(request):
     return web.FileResponse(WEBAPP_FILE)
 
@@ -1619,6 +1724,53 @@ async def on_startup(app):
                 "INSERT INTO app_migrations (migration_key) VALUES ('castle-house-defaults-v1') ON CONFLICT DO NOTHING"
             )
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS character_profiles (
+                id BIGSERIAL PRIMARY KEY,
+                character_name VARCHAR(180) NOT NULL UNIQUE,
+                biography TEXT,
+                age VARCHAR(80),
+                health VARCHAR(200),
+                title VARCHAR(300),
+                location VARCHAR(200),
+                spouse VARCHAR(300),
+                children TEXT,
+                dragon VARCHAR(180),
+                house VARCHAR(180),
+                owner_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+                warfare INTEGER NOT NULL DEFAULT 50 CHECK (warfare BETWEEN 0 AND 100),
+                intelligence INTEGER NOT NULL DEFAULT 50 CHECK (intelligence BETWEEN 0 AND 100),
+                diplomacy INTEGER NOT NULL DEFAULT 50 CHECK (diplomacy BETWEEN 0 AND 100),
+                management INTEGER NOT NULL DEFAULT 50 CHECK (management BETWEEN 0 AND 100),
+                faith INTEGER NOT NULL DEFAULT 50 CHECK (faith BETWEEN 0 AND 100),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            INSERT INTO character_profiles
+                (character_name, title, dragon, house, location, warfare, intelligence, diplomacy, management, faith)
+            VALUES
+                ('Aegon II Targaryen', 'پادشاه وستروس', 'Sunfyre', 'تارگرین', 'بارانداز پادشاه', 65, 58, 55, 62, 50),
+                ('Aemond Targaryen', 'شاهزاده تارگرین', 'Vhagar', 'تارگرین', 'بارانداز پادشاه', 92, 76, 58, 68, 45),
+                ('Helaena Targaryen', 'ملکه', 'Dreamfyre', 'تارگرین', 'بارانداز پادشاه', 25, 80, 60, 50, 65),
+                ('Daeron Targaryen', 'شاهزاده تارگرین', 'Tessarion', 'تارگرین', 'آب‌دشت', 75, 70, 65, 60, 55),
+                ('Alicent Hightower', 'ملکه مادر', NULL, 'های‌تاور', 'بارانداز پادشاه', 25, 85, 90, 80, 85),
+                ('Alf White', 'اژدهاسوار', 'Silverwing', NULL, NULL, 70, 60, 50, 45, 40),
+                ('Rhaenyra Targaryen', 'مدعی تاج‌وتخت', 'Syrax', 'تارگرین', 'دراگون‌استون', 55, 80, 88, 75, 60),
+                ('Daemon Targaryen', 'شاهزاده تارگرین', 'Caraxes', 'تارگرین', 'دراگون‌استون', 95, 78, 60, 65, 30),
+                ('Jacaerys Velaryon', 'شاهزاده', 'Vermax', 'ولاریون', 'دراگون‌استون', 72, 82, 85, 70, 55),
+                ('Rhaenys Targaryen', 'شاهزاده‌خانم', 'Meleys', 'تارگرین', 'دراگون‌استون', 80, 85, 82, 78, 50),
+                ('Baela Targaryen', 'شاهزاده‌خانم', 'Moondancer', 'تارگرین', 'دراگون‌استون', 75, 70, 65, 55, 45),
+                ('Rhaena Targaryen', 'شاهزاده‌خانم', 'Sheepstealer', 'تارگرین', 'دراگون‌استون', 55, 75, 70, 60, 50),
+                ('Hugh Hammer', 'اژدهاسوار سیاه‌ها', 'Vermithor', NULL, NULL, 80, 55, 45, 50, 35),
+                ('Corlys Velaryon', 'فرمانده ناوگان و لرد مدرفت', NULL, 'ولاریون', 'دراگون‌استون', 78, 88, 90, 95, 50),
+                ('Adam Velaryon', 'اژدهاسوار', 'Seasmoke', 'ولاریون', 'دراگون‌استون', 78, 65, 60, 55, 40),
+                ('Alyn Velaryon', 'دریانورد و وارث ولاریون', NULL, 'ولاریون', 'دراگون‌استون', 60, 70, 75, 70, 45),
+                ('Bartimos Celtigar', 'لرد خاندان سلتیگار', NULL, 'سلتیگار', 'جزیره پنجه', 55, 75, 70, 78, 50),
+                ('Lord Reynald Darklyn', 'لرد خاندان دارکلین', NULL, 'دارکلین', 'داسکندیل', 65, 70, 75, 78, 50)
+            ON CONFLICT (character_name) DO NOTHING
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_clock (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 game_year INTEGER NOT NULL DEFAULT 129,
@@ -1723,6 +1875,9 @@ def create_app():
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
+    app.router.add_get("/api/profiles", profiles_list_handler)
+    app.router.add_get("/api/profiles/{profile_id}", profile_detail_handler)
+    app.router.add_put("/api/admin/profiles/{profile_id}", admin_update_profile_handler)
     app.router.add_get("/api/game-clock", game_clock_handler)
     app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
     app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
