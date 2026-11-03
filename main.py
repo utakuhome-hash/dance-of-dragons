@@ -1502,6 +1502,60 @@ async def admin_game_clock_pause_handler(request):
 
 
 
+async def game_state_control_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT c.reset_version, g.is_running
+            FROM game_state_control c
+            CROSS JOIN game_clock g
+            WHERE c.id = 1 AND g.id = 1
+        """)
+    if not row:
+        return json_error("game_state_control_unavailable", 503)
+    return web.json_response({
+        "ok": True,
+        "reset_version": int(row["reset_version"]),
+        "is_running": bool(row["is_running"]),
+    })
+
+
+async def admin_reset_game_state_handler(request):
+    player, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT reset_version FROM game_state_control WHERE id = 1 FOR UPDATE"
+            )
+            if not row:
+                return json_error("game_state_control_unavailable", 503)
+            next_version = int(row["reset_version"]) + 1
+            await conn.execute(
+                "UPDATE game_state_control SET reset_version = $1, updated_at = NOW() WHERE id = 1",
+                next_version,
+            )
+            await conn.execute("UPDATE houses SET treasury = 0, food = 0")
+            await conn.execute("""
+                UPDATE game_clock
+                SET game_year = 129, season = 'spring', is_running = FALSE,
+                    started_at = NULL, elapsed_seconds = 0,
+                    last_year_update = NULL, last_season_update = NULL
+                WHERE id = 1
+            """)
+    return web.json_response({
+        "ok": True,
+        "reset_version": next_version,
+        "game_year": 129,
+        "season": "spring",
+        "is_running": False,
+        "message": "game_state_reset_to_defaults",
+    })
+
+
 async def profiles_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
@@ -1867,6 +1921,17 @@ async def on_startup(app):
             INSERT INTO game_clock (id, game_year, season, is_running, started_at, elapsed_seconds)
             VALUES (1, 129, 'spring', FALSE, NULL, 0) ON CONFLICT (id) DO NOTHING
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_state_control (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                reset_version BIGINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            INSERT INTO game_state_control (id, reset_version)
+            VALUES (1, 0) ON CONFLICT (id) DO NOTHING
+        """)
         needs_clock_seed = not await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'game-clock-canon-start-v1')"
         )
@@ -1958,6 +2023,8 @@ def create_app():
     app.router.add_put("/api/admin/profiles/{profile_id}", admin_update_profile_handler)
     app.router.add_put("/api/admin/profiles/{profile_id}/owner", admin_assign_profile_owner_handler)
     app.router.add_get("/api/game-clock", game_clock_handler)
+    app.router.add_get("/api/game-state-control", game_state_control_handler)
+    app.router.add_post("/api/admin/game-state/reset", admin_reset_game_state_handler)
     app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
     app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
     app.router.add_get("/api/family", family_handler)
