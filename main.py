@@ -858,7 +858,9 @@ async def mail_list_handler(request):
         rows = await conn.fetch(
             f"""
             SELECT l.id, l.subject, l.body, l.category, l.created_at,
-                   l.read_at, p.id AS other_player_id, p.username AS other_player
+                   l.read_at, l.is_anonymous,
+                   CASE WHEN $1 = 'inbox' AND l.is_anonymous THEN NULL ELSE p.id END AS other_player_id,
+                   CASE WHEN $1 = 'inbox' AND l.is_anonymous THEN 'ناشناس' ELSE p.username END AS other_player
             FROM game_letters l
             JOIN players p ON p.id = CASE WHEN $1 = 'inbox'
                 THEN l.sender_player_id ELSE l.recipient_player_id END
@@ -893,6 +895,7 @@ async def mail_send_handler(request):
     subject = str(data.get("subject", "")).strip()
     body = str(data.get("body", "")).strip()
     category = str(data.get("category", "personal")).strip()
+    is_anonymous = data.get("is_anonymous", False) is True
     allowed = {"diplomacy", "marriage", "trade", "military", "warning", "personal"}
     if not subject or len(subject) > 160:
         return json_error("invalid_subject")
@@ -912,11 +915,11 @@ async def mail_send_handler(request):
         row = await conn.fetchrow(
             """
             INSERT INTO game_letters
-                (sender_player_id, recipient_player_id, subject, body, category, created_at)
-            VALUES ($1, $2, $3, $4, $5, NOW())
+                (sender_player_id, recipient_player_id, subject, body, category, is_anonymous, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
             RETURNING id, created_at
             """,
-            player["id"], recipient_id, subject, body, category,
+            player["id"], recipient_id, subject, body, category, is_anonymous,
         )
     letter = dict(row)
     if letter.get("created_at") is not None:
@@ -1072,9 +1075,11 @@ async def on_startup(app):
                 body TEXT NOT NULL,
                 category VARCHAR(20) NOT NULL DEFAULT 'personal',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                read_at TIMESTAMPTZ
+                read_at TIMESTAMPTZ,
+                is_anonymous BOOLEAN NOT NULL DEFAULT FALSE
             )
         """)
+        await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
     await bot.set_webhook(WEBHOOK_URL)
