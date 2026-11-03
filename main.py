@@ -1329,6 +1329,85 @@ async def mail_players_handler(request):
     return web.json_response({"ok": True, "players": [dict(row) for row in rows]})
 
 
+
+async def market_listings_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT l.id, l.item_name, l.quantity, l.unit_price, l.currency,
+                   l.note, l.created_at, l.status, l.seller_house_id,
+                   h.name AS house_name, p.username AS seller_name
+            FROM market_listings l
+            JOIN houses h ON h.id = l.seller_house_id
+            JOIN players p ON p.id = l.seller_player_id
+            WHERE l.status = 'active'
+            ORDER BY l.created_at DESC
+            LIMIT 200
+        """)
+    listings = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = item["created_at"].isoformat()
+        item["quantity"] = int(item["quantity"])
+        item["unit_price"] = int(item["unit_price"])
+        item["total_price"] = item["quantity"] * item["unit_price"]
+        listings.append(item)
+    return web.json_response({"ok": True, "listings": listings})
+
+
+async def market_create_listing_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("player_has_no_house", 403)
+    try:
+        data = await request.json()
+        item_name = str(data.get("item_name", "")).strip()
+        quantity = int(data.get("quantity", 0))
+        unit_price = int(data.get("unit_price", 0))
+        note = str(data.get("note", "")).strip()
+    except (ValueError, TypeError, Exception):
+        return json_error("invalid_listing")
+    if not item_name or len(item_name) > 100:
+        return json_error("invalid_item_name")
+    if quantity < 1 or quantity > 1000000000 or unit_price < 1 or unit_price > 1000000000:
+        return json_error("invalid_quantity_or_price")
+    if quantity * unit_price > 9000000000000000:
+        return json_error("price_overflow")
+    if len(note) > 1000:
+        return json_error("note_too_long")
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO market_listings
+                (seller_player_id, seller_house_id, item_name, quantity,
+                 unit_price, currency, note, status)
+            VALUES ($1, $2, $3, $4, $5, 'سکه', $6, 'active')
+            RETURNING id
+        """, player["id"], player["house_id"], item_name, quantity, unit_price, note)
+    return web.json_response({"ok": True, "listing_id": int(row["id"])})
+
+
+async def market_cancel_listing_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    try:
+        listing_id = int(request.match_info["listing_id"])
+    except ValueError:
+        return json_error("invalid_listing_id")
+    async with request.app["db"].acquire() as conn:
+        result = await conn.execute("""
+            UPDATE market_listings
+            SET status = 'cancelled', updated_at = NOW()
+            WHERE id = $1 AND seller_player_id = $2 AND status = 'active'
+        """, listing_id, player["id"])
+    if result.endswith(" 0"):
+        return json_error("listing_not_found_or_not_owned", 404)
+    return web.json_response({"ok": True})
+
 async def mail_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -1954,6 +2033,25 @@ async def on_startup(app):
             """)
             await conn.execute("INSERT INTO app_migrations (migration_key) VALUES ('game-clock-canon-start-v1') ON CONFLICT DO NOTHING")
 
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS market_listings (
+                id BIGSERIAL PRIMARY KEY,
+                seller_player_id BIGINT NOT NULL REFERENCES players(id),
+                seller_house_id BIGINT NOT NULL REFERENCES houses(id),
+                item_name VARCHAR(100) NOT NULL,
+                quantity BIGINT NOT NULL CHECK (quantity > 0),
+                unit_price BIGINT NOT NULL CHECK (unit_price > 0),
+                currency VARCHAR(20) NOT NULL DEFAULT 'سکه',
+                note TEXT NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'cancelled', 'completed')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS market_listings_active_idx ON market_listings (status, created_at DESC)")
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
                 id BIGSERIAL PRIMARY KEY,
@@ -2067,6 +2165,9 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
+    app.router.add_get("/api/market/listings", market_listings_handler)
+    app.router.add_post("/api/market/listings", market_create_listing_handler)
+    app.router.add_delete("/api/market/listings/{listing_id}", market_cancel_listing_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
     app.router.add_get("/api/mail/unread-count", mail_unread_count_handler)
