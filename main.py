@@ -1514,13 +1514,14 @@ async def profiles_list_handler(request):
                 FROM character_profiles ORDER BY character_name
             """)
         else:
-            # Public profile directory: all players can browse character profiles.
-            # Private skills remain protected by profile_detail_handler.
+            # The personal profile section lists only characters assigned to this player.
+            # Public biographies remain available through /api/profiles/public (court pages).
             rows = await conn.fetch("""
                 SELECT id, character_name, title, location, house
                 FROM character_profiles
+                WHERE owner_player_id = $1
                 ORDER BY character_name
-            """)
+            """, player["id"])
         profiles = [dict(row) for row in rows]
         players = []
         if is_admin:
