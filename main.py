@@ -1363,6 +1363,18 @@ async def mail_list_handler(request):
     return web.json_response({"ok": True, "letters": letters})
 
 
+async def mail_unread_count_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM game_letters WHERE recipient_player_id = $1 AND read_at IS NULL",
+            player["id"],
+        )
+    return web.json_response({"ok": True, "unread_count": int(count or 0)})
+
+
 async def mail_send_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -1958,6 +1970,17 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
+        # The existing shared inbox contents were demonstration letters. Clear
+        # that initial batch once; letters sent after this migration are kept.
+        needs_demo_mail_cleanup = not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'clear-shared-demo-letters-v1')"
+        )
+        if needs_demo_mail_cleanup:
+            await conn.execute("DELETE FROM game_letters")
+            await conn.execute("""
+                INSERT INTO app_migrations (migration_key)
+                VALUES ('clear-shared-demo-letters-v1') ON CONFLICT DO NOTHING
+            """)
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS court_appointments (
@@ -2046,6 +2069,7 @@ def create_app():
     app.router.add_post("/api/admin/players", admin_add_player_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
+    app.router.add_get("/api/mail/unread-count", mail_unread_count_handler)
     app.router.add_post("/api/mail", mail_send_handler)
     app.router.add_post("/api/mail/{letter_id}/read", mail_read_handler)
 
