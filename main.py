@@ -1337,7 +1337,7 @@ async def market_listings_handler(request):
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch("""
             SELECT l.id, l.item_name, l.quantity, l.unit_price, l.currency,
-                   l.note, l.created_at, l.status, l.seller_house_id,
+                   l.note, l.created_at, l.status, l.seller_house_id, l.seller_player_id,
                    h.name AS house_name, p.username AS seller_name
             FROM market_listings l
             JOIN houses h ON h.id = l.seller_house_id
@@ -1353,6 +1353,7 @@ async def market_listings_handler(request):
         item["quantity"] = int(item["quantity"])
         item["unit_price"] = int(item["unit_price"])
         item["total_price"] = item["quantity"] * item["unit_price"]
+        item["is_mine"] = int(item["seller_player_id"]) == int(player["id"])
         listings.append(item)
     return web.json_response({"ok": True, "listings": listings})
 
