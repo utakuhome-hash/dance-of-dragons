@@ -639,7 +639,7 @@ TRAVEL_CASTLE_ALIASES = {
     "قلعه سوان": ["قلعه سوان", "استون‌هلم", "Stonehelm", "House Swann"],
     "قلعه فل": ["قلعه فل", "فل‌وود هال", "Felwood", "House Fell"],
     "ایری": ["ایری", "Eyrie", "The Eyrie"],
-    "ران‌استون": ["ران‌استون", "ران استون", "Runestone"],
+    "ران‌استون": ["ران‌استون", "ران استون", "رانستون", "Runestone"],
     "هارتس‌هوم": ["هارتس‌هوم", "هارتس هوم", "Harte's Home", "Harte’s Home"],
     "سان‌اسپیر": ["سان‌اسپیر", "سان اسپیر", "Sunspear"],
     "یرنوود": ["یرنوود", "Yronwood"],
@@ -652,6 +652,157 @@ TRAVEL_CASTLE_ALIASES = {
     "گریت‌ویک": ["گریت‌ویک", "گریت ویک", "Great Wyk"],
 }
 
+
+TRAVEL_CHARACTER_ROSTER = {
+    "دراگون‌استون": [
+        "رینیرا تارگرین | Rhaenyra Targaryen",
+        "دیمون تارگرین | Daemon Targaryen",
+        "جیسریس ولاریون | Jacaerys Velaryon",
+        "بیلا تارگرین | Baela Targaryen",
+        "رینا تارگرین | Rhaena Targaryen",
+        "رینیس تارگرین | Rhaenys Targaryen",
+        "هیو همر | Hugh Hammer",
+        "اریک کارگیل | Erryk Cargyll",
+        "آدام ولاریون | Addam Velaryon"
+    ],
+    "کینگزلندینگ": [
+        "اگان دوم تارگرین | Aegon II Targaryen",
+        "هلینا تارگرین | Helaena Targaryen",
+        "الیسنت های‌تاور | Alicent Hightower",
+        "ایموند تارگرین | Aemond Targaryen",
+        "کریستون کول | Criston Cole",
+        "سر لوثر لارجنت | Ser Luthor Largent",
+        "اریک کارگیل | Arryk Cargyll",
+        "اولف وایت | Ulf White",
+        "سپتون اعظم | The High Septon"
+    ],
+    "اولدتاون": [
+        "دیرون تارگرین | Daeron Targaryen",
+        "اتو های‌تاور | Otto Hightower",
+        "اورموند های‌تاور | Ormund Hightower",
+        "سر جون روکستون | Ser Jon Roxton",
+        "سر گوین های‌تاور | Ser Gwayne Hightower"
+    ],
+    "دریفت‌مارک": [
+        "کورلیس ولاریون | Corlys Velaryon",
+        "آدام ولاریون | Addam Velaryon"
+    ],
+    "سلتگار": [
+        "بارتیموس سلتگار | Bartimos Celtigar"
+    ],
+    "دارکلین": [
+        "ینالد دارکلین | Ynald Darklyn"
+    ],
+    "ریوران": [
+        "اسکار تالی | Grover Tully",
+        "ادموند تالی | Elmo Tully",
+        "کرمیت تالی | Kermit Tully",
+        "تینسا تالی | Tansy Tully"
+    ],
+    "استون‌هج": [
+        "آموس براکن | Amos Bracken"
+    ],
+    "ریون‌تری‌هال": [
+        "بنجیکات بلک‌وود | Benjicot Blackwood"
+    ],
+    "تویینز": [
+        "فورست فری | Forrest Frey"
+    ],
+    "وینترفل": [
+        "کریگان استارک | Cregan Stark",
+        "ریکان استارک | Rickon Stark",
+        "بنجن استارک | Benjen Stark",
+        "سارا اسنو | Sara Snow"
+    ],
+    "لاست هرت": [
+        "هارموند آمبر | Harmond Umber"
+    ],
+    "کارهولد": [
+        "آلیس کاراستارک | Alys Karstark"
+    ],
+    "باروتون": [
+        "رودریک داستین | Roderick Dustin"
+    ],
+    "کسترلی‌راک": [
+        "جیسون لنیستر | Jason Lannister",
+        "تایلند لنیستر | Tyland Lannister",
+        "لورِن لنیستر | Loreon Lannister",
+        "جُهانا لنیستر | Johanna Lannister"
+    ],
+    "کرکهال": [
+        "کلارنت کرکهال | Clarrent Crakehall"
+    ],
+    "گلدن‌توس": [
+        "هامفری لفورد | Humphrey Lefford"
+    ],
+    "های‌گاردن": [
+        "لیونل تایرل | Lyonel Tyrell",
+        "لوراس تایرل | Loras Tyrell",
+        "لئو تایرل | Leo Tyrell",
+        "جنسیا فاسوی | Jancia Fossoway"
+    ],
+    "هورن‌هیل": [
+        "آلن تارلی | Alan Tarly"
+    ],
+    "آربور": [
+        "گارث ردواین | Garth Redwyne"
+    ],
+    "استورمزاند": [
+        "بوروس باراثیون | Borros Baratheon",
+        "رویس باراثیون | Royce Baratheon",
+        "کاساندرا باراثیون | Cassandra Baratheon"
+    ],
+    "نایت‌سانگ": [
+        "رویس کارون | Royce Caron"
+    ],
+    "قلعه سوان": [
+        "بایرون سوان | Byron Swann"
+    ],
+    "قلعه فل": [
+        "ویلیس فل | Willis Fell"
+    ],
+    "ایری": [
+        "جین آرین | Jeyne Arryn",
+        "آرنولد آرین | Arnold Arryn",
+        "جوفری آرین | Joffrey Arryn"
+    ],
+    "ران‌استون": [
+        "یوربرت رویس | Yorbert Royce"
+    ],
+    "هارتس‌هوم": [
+        "لئووین کوربری | Leowyn Corbray"
+    ],
+    "سان‌اسپیر": [
+        "قورن مارتل | Qoren Martell",
+        "آلیاندرا مارتل | Aliandra Martell",
+        "کوریان مارتل | Coryanne Martell"
+    ],
+    "یرنوود": [
+        "آندرس یرونوود | Anders Yronwood"
+    ],
+    "اسکای‌ریچ": [
+        "فرانکلین فولر | Franklyn Fowler"
+    ],
+    "گادزگریس": [
+        "دلون آلیرین | Delonne Allyrion"
+    ],
+    "استارفال": [
+        "ادریک دین | Edric Dayne"
+    ],
+    "پایک": [
+        "دالتون گریجوی | Dalton Greyjoy",
+        "ورون گریجوی | Veron Greyjoy"
+    ],
+    "ده برج": [
+        "سر هاراس هارلو | Ser Harras Harlaw"
+    ],
+    "بلک‌تاید": [
+        "لورِن بلکتاید | Lorren Blacktyde"
+    ],
+    "گریت‌ویک": [
+        "گورولد گودبرو | Gorold Goodbrother"
+    ]
+}
 
 def canonical_travel_castle(value):
     normalized = normalize_court_name(value)
@@ -734,6 +885,9 @@ async def character_travel_update_handler(request):
     player_castle = canonical_travel_castle(player.get("castle_name"))
     if not character_name or len(character_name) > 150 or not home_castle or not destination:
         return json_error("invalid_travel")
+    allowed_names = TRAVEL_CHARACTER_ROSTER.get(home_castle, [])
+    if character_name not in allowed_names:
+        return json_error("unknown_character")
     if not player.get("is_super_admin") and player_castle != home_castle:
         return json_error("forbidden", 403)
     async with request.app["db"].acquire() as conn:
