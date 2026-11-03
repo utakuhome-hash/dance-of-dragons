@@ -1508,20 +1508,38 @@ async def profiles_list_handler(request):
         return json_error("unauthorized", 401)
     is_admin = bool(player.get("is_super_admin") and player.get("role") == "admin")
     async with request.app["db"].acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, character_name, title, location, house, owner_player_id
-            FROM character_profiles ORDER BY character_name
-        """)
+        if is_admin:
+            rows = await conn.fetch("""
+                SELECT id, character_name, title, location, house, owner_player_id
+                FROM character_profiles ORDER BY character_name
+            """)
+        else:
+            rows = await conn.fetch("""
+                SELECT id, character_name, title, location, house
+                FROM character_profiles
+                WHERE owner_player_id = $1
+                ORDER BY character_name
+            """, player["id"])
         profiles = [dict(row) for row in rows]
         players = []
         if is_admin:
             players = [dict(r) for r in await conn.fetch(
                 "SELECT id, username FROM players WHERE is_active = TRUE ORDER BY username"
             )]
-    if not is_admin:
-        for profile in profiles:
-            profile.pop("owner_player_id", None)
     return web.json_response({"ok": True, "profiles": profiles, "is_admin": is_admin, "players": players})
+
+
+async def public_profiles_list_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, character_name, title, location, house
+            FROM character_profiles
+            ORDER BY character_name
+        """)
+    return web.json_response({"ok": True, "profiles": [dict(row) for row in rows]})
 
 
 async def profile_detail_handler(request):
@@ -1878,6 +1896,7 @@ def create_app():
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
     app.router.add_get("/api/profiles", profiles_list_handler)
+    app.router.add_get("/api/profiles/public", public_profiles_list_handler)
     app.router.add_get("/api/profiles/{profile_id}", profile_detail_handler)
     app.router.add_put("/api/admin/profiles/{profile_id}", admin_update_profile_handler)
     app.router.add_get("/api/game-clock", game_clock_handler)
