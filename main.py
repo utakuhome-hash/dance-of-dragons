@@ -442,6 +442,176 @@ async def castle_members_handler(request):
     })
 
 
+
+def normalize_court_name(value):
+    value = str(value or "").lower().replace("ي", "ی").replace("ك", "ک")
+    return "".join(ch for ch in value if not ch.isspace() and ch not in "\\u200c-'’_")
+
+
+def court_posts_for_castle(castle_name):
+    normalized = normalize_court_name(castle_name)
+    if normalized in (normalize_court_name("کینگزلندینگ"), normalize_court_name("King's Landing")):
+        return {
+            "hand": "دست پادشاه",
+            "ships": "استاد کشتی‌ها",
+            "laws": "استاد قوانین",
+            "coin": "استاد سکه",
+            "whispers": "استاد نجواها",
+            "army": "فرمانده ارتش سلطنتی",
+            "kingsguard": "فرمانده گارد شاهی",
+            "citywatch": "فرمانده گارد شهری",
+        }
+    if normalized in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
+        return {
+            "hand": "دست ملکه",
+            "ships": "استاد کشتی‌ها",
+            "laws": "استاد قوانین",
+            "coin": "استاد سکه",
+            "whispers": "استاد نجواها",
+            "army": "فرمانده ارتش سلطنتی",
+            "kingsguard": "فرمانده گارد شاهی",
+            "citywatch": "فرمانده گارد شهری",
+        }
+    return {
+        "spymaster": "رئیس جاسوسان قلعه",
+        "commander": "فرمانده نیروهای قلعه",
+        "treasurer": "خزانه‌دار قلعه",
+    }
+
+
+def can_manage_court(player, castle_name):
+    if not player or not player.get("is_active"):
+        return False
+    if player.get("is_super_admin"):
+        return True
+    user = normalize_court_name(player.get("username"))
+    castle = normalize_court_name(castle_name)
+    if castle in (normalize_court_name("کینگزلندینگ"), normalize_court_name("King's Landing")):
+        return "اگان" in user or "aegon" in user
+    if castle in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
+        return "رینیرا" in user or "rhaenyra" in user
+    return (
+        player.get("role") == "house_leader"
+        and normalize_court_name(player.get("castle_name")) == castle
+    )
+
+
+def court_post_authority(post_key, castle_name):
+    if post_key == "hand":
+        return ["realm:delegated_executive", "realm:diplomacy", "realm:military", "realm:justice", "realm:treasury", "realm:intelligence"]
+    if post_key == "ships":
+        return ["realm:naval"]
+    if post_key == "laws":
+        return ["realm:justice"]
+    if post_key == "coin":
+        return ["realm:treasury"]
+    if post_key == "whispers":
+        return ["realm:intelligence"]
+    if post_key == "army":
+        return ["realm:military"]
+    if post_key == "kingsguard":
+        return ["realm:kingsguard"]
+    if post_key == "citywatch":
+        return ["realm:city_watch"]
+    if post_key == "spymaster":
+        return ["castle:intelligence"]
+    if post_key == "commander":
+        return ["castle:military"]
+    if post_key == "treasurer":
+        return ["castle:treasury"]
+    return []
+
+
+async def court_appointments_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    castle_name = str(request.query.get("castle_name") or player.get("castle_name") or "").strip()
+    if not castle_name or len(castle_name) > 150:
+        return json_error("invalid_castle_name")
+    if not player.get("is_super_admin") and normalize_court_name(castle_name) != normalize_court_name(player.get("castle_name")):
+        return json_error("forbidden", 403)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT post_key, appointee_name, updated_at
+            FROM court_appointments
+            WHERE castle_name = $1
+            ORDER BY post_key
+            """,
+            castle_name,
+        )
+    posts = court_posts_for_castle(castle_name)
+    appointments = {
+        row["post_key"]: {
+            "post_key": row["post_key"],
+            "title": posts.get(row["post_key"], row["post_key"]),
+            "appointee_name": row["appointee_name"],
+            "updated_at": row["updated_at"].isoformat(),
+            "authority": court_post_authority(row["post_key"], castle_name),
+        }
+        for row in rows
+    }
+    return web.json_response({
+        "ok": True,
+        "castle_name": castle_name,
+        "appointments": appointments,
+        "posts": posts,
+        "can_manage": can_manage_court(player, castle_name),
+        "sovereign_retains_final_authority": True,
+    })
+
+
+async def court_appointment_update_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    try:
+        data = await request.json()
+    except Exception:
+        return json_error("invalid_json")
+    castle_name = str(data.get("castle_name") or player.get("castle_name") or "").strip()
+    post_key = str(data.get("post_key") or "").strip()
+    appointee_name = str(data.get("appointee_name") or "").strip()
+    if not castle_name or len(castle_name) > 150 or len(appointee_name) > 150:
+        return json_error("invalid_appointment")
+    if not can_manage_court(player, castle_name):
+        return json_error("forbidden", 403)
+    posts = court_posts_for_castle(castle_name)
+    if post_key not in posts:
+        return json_error("invalid_court_post")
+    if not appointee_name:
+        async with request.app["db"].acquire() as conn:
+            await conn.execute(
+                "DELETE FROM court_appointments WHERE castle_name = $1 AND post_key = $2",
+                castle_name, post_key,
+            )
+        return web.json_response({"ok": True, "removed": True, "post_key": post_key})
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO court_appointments (castle_name, post_key, appointee_name, appointed_by, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (castle_name, post_key)
+            DO UPDATE SET appointee_name = EXCLUDED.appointee_name,
+                          appointed_by = EXCLUDED.appointed_by,
+                          updated_at = NOW()
+            RETURNING post_key, appointee_name, updated_at
+            """,
+            castle_name, post_key, appointee_name, player["id"],
+        )
+    return web.json_response({
+        "ok": True,
+        "appointment": {
+            "post_key": row["post_key"],
+            "title": posts[post_key],
+            "appointee_name": row["appointee_name"],
+            "updated_at": row["updated_at"].isoformat(),
+            "authority": court_post_authority(post_key, castle_name),
+        },
+    })
+
+
 async def family_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -1085,6 +1255,17 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS court_appointments (
+                castle_name VARCHAR(150) NOT NULL,
+                post_key VARCHAR(50) NOT NULL,
+                appointee_name VARCHAR(150) NOT NULL,
+                appointed_by BIGINT REFERENCES players(id),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (castle_name, post_key)
+            )
+        """)
     try:
         await bot.set_webhook(WEBHOOK_URL)
     except TelegramRetryAfter as exc:
@@ -1123,6 +1304,8 @@ def create_app():
     app.router.add_get("/api/me", me_handler)
     app.router.add_get("/api/family", family_handler)
     app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
+    app.router.add_get("/api/court/appointments", court_appointments_handler)
+    app.router.add_put("/api/court/appointments", court_appointment_update_handler)
     app.router.add_post("/api/family/members/{player_id}", family_add_member_handler)
     app.router.add_delete("/api/family/members/{player_id}", family_remove_member_handler)
     app.router.add_put("/api/admin/players/{player_id}/role", admin_update_player_role_handler)
