@@ -1791,6 +1791,19 @@ async def on_startup(app):
                 ('Lord Reynald Darklyn', 'لرد خاندان دارکلین', NULL, 'دارکلین', 'داسکندیل', 65, 70, 75, 78, 50)
             ON CONFLICT (character_name) DO NOTHING
         """)
+        # Import every character already registered in the bot's travel rosters.
+        # Only use facts present in that roster; do not invent ages, biographies,
+        # houses, titles, or private skill values.
+        for castle_name, roster in TRAVEL_CHARACTER_ROSTER.items():
+            for roster_entry in roster:
+                character_name = str(roster_entry).split("|")[-1].strip()
+                if not character_name:
+                    continue
+                await conn.execute("""
+                    INSERT INTO character_profiles (character_name, location)
+                    VALUES ($1, $2)
+                    ON CONFLICT (character_name) DO NOTHING
+                """, character_name, castle_name)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_clock (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
