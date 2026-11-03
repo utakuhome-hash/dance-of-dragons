@@ -1445,12 +1445,12 @@ async def read_game_clock(conn):
     total_seconds = int(row["total_elapsed_seconds"] or 0)
     seasons = [("spring", "بهار", "🌱"), ("summer", "تابستان", "☀️"),
                ("autumn", "پاییز", "🍂"), ("winter", "زمستان", "❄️")]
-    season_key, season_label, season_icon = seasons[int((total_seconds % 86400) // 21600)]
+    season_key, season_label, season_icon = seasons[int((total_seconds % 691200) // 172800)]
     return {
         "game_year": int(row["game_year"]) + (total_seconds // 86400),
         "season": season_key, "season_label": season_label, "season_icon": season_icon,
         "is_running": bool(row["is_running"]), "total_elapsed_seconds": total_seconds,
-        "seconds_until_season": 21600 - (total_seconds % 21600),
+        "seconds_until_season": 172800 - (total_seconds % 172800),
         "seconds_until_year": 86400 - (total_seconds % 86400),
     }
 
