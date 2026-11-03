@@ -859,7 +859,7 @@ async def mail_list_handler(request):
             f"""
             SELECT l.id, l.subject, l.body, l.category, l.created_at,
                    l.read_at, l.is_anonymous,
-                   p.id AS other_player_id,
+                   CASE WHEN $1 = 'inbox' AND l.is_anonymous THEN NULL ELSE p.id END AS other_player_id,
                    CASE WHEN $1 = 'inbox' AND l.is_anonymous THEN 'ناشناس' ELSE p.username END AS other_player
             FROM game_letters l
             JOIN players p ON p.id = CASE WHEN $1 = 'inbox'
