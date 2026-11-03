@@ -817,7 +817,7 @@ async def admin_add_player_handler(request):
                     INSERT INTO players
                         (username, password_hash, telegram_id, role, house_id,
                          is_active, created_at, is_super_admin)
-                    VALUES ($1, NULL, $2, 'player', NULL, TRUE, NOW(), FALSE)
+                    VALUES ($1, '', $2, 'player', NULL, TRUE, NOW(), FALSE)
                     RETURNING id, username, telegram_id, role, house_id,
                               is_active, is_super_admin
                     """,
