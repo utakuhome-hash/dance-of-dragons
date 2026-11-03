@@ -123,11 +123,16 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    const scope=player&&player.house_id?'house_'+player.house_id:(player&&player.id?'player_'+player.id:'guest');
    const versionKey='dod_reset_version_'+scope;
    const scopedKey=scope==='guest'?'dod_demo_state_v1':'dod_demo_state_v1_scope_'+scope;
+   const storedVersion=localStorage.getItem(versionKey);
+   const knownVersion=storedVersion===null?'0':storedVersion;
    let didReset=false;
-   if(localStorage.getItem(versionKey)!==String(control.reset_version)){
+   if(knownVersion!==String(control.reset_version)){
     localStorage.removeItem(scopedKey);
+    localStorage.removeItem('dod_demo_state_v1');
     localStorage.setItem(versionKey,String(control.reset_version));
     didReset=true;
+   }else if(storedVersion===null){
+    localStorage.setItem(versionKey,knownVersion);
    }
    localStorage.setItem('dod_game_running',clock.is_running?'true':'false');
    const frame=document.getElementById('view');
