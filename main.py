@@ -1409,6 +1409,118 @@ async def market_cancel_listing_handler(request):
         return json_error("listing_not_found_or_not_owned", 404)
     return web.json_response({"ok": True})
 
+async def trade_houses_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("SELECT id, name FROM houses WHERE id <> COALESCE($1, 0) ORDER BY name", player.get("house_id"))
+    return web.json_response({"ok": True, "houses": [dict(r) for r in rows]})
+
+
+async def trade_contracts_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("player_has_no_house", 403)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT c.*, ph.name AS proposer_house_name, rh.name AS recipient_house_name,
+                   pp.username AS proposer_name, rp.username AS recipient_name,
+                   (c.proposer_house_id = $1) AS is_proposer_house,
+                   (c.recipient_house_id = $1) AS is_recipient_house
+            FROM trade_contracts c
+            JOIN houses ph ON ph.id = c.proposer_house_id
+            JOIN houses rh ON rh.id = c.recipient_house_id
+            JOIN players pp ON pp.id = c.proposer_player_id
+            LEFT JOIN players rp ON rp.id = c.recipient_player_id
+            WHERE c.proposer_house_id = $1 OR c.recipient_house_id = $1
+            ORDER BY c.created_at DESC LIMIT 100
+        """, player["house_id"])
+    contracts = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = item["created_at"].isoformat()
+        item["responded_at"] = item["responded_at"].isoformat() if item["responded_at"] else None
+        for key in ("offered_quantity", "requested_quantity", "penalty_coins"):
+            item[key] = int(item[key])
+        contracts.append(item)
+    return web.json_response({"ok": True, "contracts": contracts})
+
+
+async def trade_contract_create_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("player_has_no_house", 403)
+    try:
+        data = await request.json()
+        recipient_house_id = int(data.get("recipient_house_id", 0))
+        offered_item = str(data.get("offered_item", "")).strip()
+        offered_quantity = int(data.get("offered_quantity", 0))
+        requested_item = str(data.get("requested_item", "")).strip()
+        requested_quantity = int(data.get("requested_quantity", 0))
+        duration_years = int(data.get("duration_years", 0))
+        penalty_coins = int(data.get("penalty_coins", 0))
+    except Exception:
+        return json_error("invalid_contract")
+    if recipient_house_id <= 0 or recipient_house_id == int(player["house_id"]):
+        return json_error("invalid_recipient_house")
+    if not offered_item or len(offered_item) > 100 or not requested_item or len(requested_item) > 100:
+        return json_error("invalid_contract_item")
+    if not (1 <= offered_quantity <= 1000000000 and 1 <= requested_quantity <= 1000000000):
+        return json_error("invalid_contract_quantity")
+    if not (1 <= duration_years <= 100 and 0 <= penalty_coins <= 1000000000000):
+        return json_error("invalid_contract_terms")
+    async with request.app["db"].acquire() as conn:
+        exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM houses WHERE id = $1)", recipient_house_id)
+        if not exists:
+            return json_error("recipient_house_not_found", 404)
+        row = await conn.fetchrow("""
+            INSERT INTO trade_contracts
+                (proposer_player_id, proposer_house_id, recipient_house_id,
+                 offered_item, offered_quantity, requested_item, requested_quantity,
+                 duration_years, penalty_coins)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id
+        """, player["id"], player["house_id"], recipient_house_id, offered_item,
+             offered_quantity, requested_item, requested_quantity, duration_years, penalty_coins)
+    return web.json_response({"ok": True, "contract_id": int(row["id"])})
+
+
+async def trade_contract_respond_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("player_has_no_house", 403)
+    try:
+        contract_id = int(request.match_info["contract_id"])
+        data = await request.json()
+        decision = str(data.get("decision", "")).strip().lower()
+    except Exception:
+        return json_error("invalid_response")
+    if decision not in ("accept", "reject"):
+        return json_error("invalid_decision")
+    status = "accepted" if decision == "accept" else "rejected"
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("""
+                SELECT id, recipient_house_id, status FROM trade_contracts
+                WHERE id = $1 FOR UPDATE
+            """, contract_id)
+            if not row or int(row["recipient_house_id"]) != int(player["house_id"]):
+                return json_error("contract_not_found_or_not_for_house", 404)
+            if row["status"] != "pending":
+                return json_error("contract_already_answered", 409)
+            await conn.execute("""
+                UPDATE trade_contracts SET status = $1, recipient_player_id = $2,
+                    responded_at = NOW() WHERE id = $3
+            """, status, player["id"], contract_id)
+    return web.json_response({"ok": True, "status": status})
+
+
 async def mail_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -2054,6 +2166,27 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS market_listings_active_idx ON market_listings (status, created_at DESC)")
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_contracts (
+                id BIGSERIAL PRIMARY KEY,
+                proposer_player_id BIGINT NOT NULL REFERENCES players(id),
+                proposer_house_id BIGINT NOT NULL REFERENCES houses(id),
+                recipient_house_id BIGINT NOT NULL REFERENCES houses(id),
+                recipient_player_id BIGINT REFERENCES players(id),
+                offered_item VARCHAR(100) NOT NULL,
+                offered_quantity BIGINT NOT NULL CHECK (offered_quantity > 0),
+                requested_item VARCHAR(100) NOT NULL,
+                requested_quantity BIGINT NOT NULL CHECK (requested_quantity > 0),
+                duration_years INTEGER NOT NULL CHECK (duration_years BETWEEN 1 AND 100),
+                penalty_coins BIGINT NOT NULL CHECK (penalty_coins >= 0),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','accepted','rejected','cancelled','completed','breached')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                responded_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS trade_contracts_houses_idx ON trade_contracts (proposer_house_id, recipient_house_id, status, created_at DESC)")
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
                 id BIGSERIAL PRIMARY KEY,
                 sender_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -2166,6 +2299,10 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
+    app.router.add_get("/api/trade/houses", trade_houses_handler)
+    app.router.add_get("/api/trade/contracts", trade_contracts_handler)
+    app.router.add_post("/api/trade/contracts", trade_contract_create_handler)
+    app.router.add_post("/api/trade/contracts/{contract_id}/respond", trade_contract_respond_handler)
     app.router.add_get("/api/market/listings", market_listings_handler)
     app.router.add_post("/api/market/listings", market_create_listing_handler)
     app.router.add_delete("/api/market/listings/{listing_id}", market_cancel_listing_handler)
