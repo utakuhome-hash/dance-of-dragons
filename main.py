@@ -1432,6 +1432,75 @@ async def mail_read_handler(request):
     return web.json_response({"ok": True})
 
 
+async def read_game_clock(conn):
+    row = await conn.fetchrow("""
+        SELECT game_year, is_running,
+               CASE WHEN is_running AND started_at IS NOT NULL
+                    THEN elapsed_seconds + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at))))::BIGINT
+                    ELSE elapsed_seconds END AS total_elapsed_seconds
+        FROM game_clock WHERE id = 1
+    """)
+    if not row:
+        return None
+    total_seconds = int(row["total_elapsed_seconds"] or 0)
+    seasons = [("spring", "بهار", "🌱"), ("summer", "تابستان", "☀️"),
+               ("autumn", "پاییز", "🍂"), ("winter", "زمستان", "❄️")]
+    season_key, season_label, season_icon = seasons[int((total_seconds % 86400) // 21600)]
+    return {
+        "game_year": int(row["game_year"]) + (total_seconds // 86400),
+        "season": season_key, "season_label": season_label, "season_icon": season_icon,
+        "is_running": bool(row["is_running"]), "total_elapsed_seconds": total_seconds,
+        "seconds_until_season": 21600 - (total_seconds % 21600),
+        "seconds_until_year": 86400 - (total_seconds % 86400),
+    }
+
+
+async def game_clock_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        clock = await read_game_clock(conn)
+    if not clock:
+        return json_error("game_clock_unavailable", 503)
+    return web.json_response({"ok": True, **clock})
+
+
+async def admin_game_clock_start_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT is_running FROM game_clock WHERE id = 1 FOR UPDATE")
+            if not row:
+                return json_error("game_clock_unavailable", 503)
+            if not row["is_running"]:
+                await conn.execute("UPDATE game_clock SET is_running = TRUE, started_at = NOW() WHERE id = 1")
+            clock = await read_game_clock(conn)
+    return web.json_response({"ok": True, **clock})
+
+
+async def admin_game_clock_pause_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT is_running, started_at FROM game_clock WHERE id = 1 FOR UPDATE")
+            if not row:
+                return json_error("game_clock_unavailable", 503)
+            if row["is_running"] and row["started_at"]:
+                await conn.execute("""
+                    UPDATE game_clock
+                    SET elapsed_seconds = elapsed_seconds + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at))))::BIGINT,
+                        is_running = FALSE, started_at = NULL
+                    WHERE id = 1
+                """)
+            clock = await read_game_clock(conn)
+    return web.json_response({"ok": True, **clock})
+
+
 async def index_handler(request):
     return web.FileResponse(WEBAPP_FILE)
 
@@ -1550,6 +1619,36 @@ async def on_startup(app):
                 "INSERT INTO app_migrations (migration_key) VALUES ('castle-house-defaults-v1') ON CONFLICT DO NOTHING"
             )
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_clock (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                game_year INTEGER NOT NULL DEFAULT 129,
+                season VARCHAR(20) NOT NULL DEFAULT 'spring',
+                last_year_update TIMESTAMPTZ,
+                last_season_update TIMESTAMPTZ,
+                is_running BOOLEAN NOT NULL DEFAULT FALSE,
+                started_at TIMESTAMPTZ,
+                elapsed_seconds BIGINT NOT NULL DEFAULT 0,
+                CHECK (season IN ('spring', 'summer', 'autumn', 'winter'))
+            )
+        """)
+        await conn.execute("ALTER TABLE game_clock ADD COLUMN IF NOT EXISTS is_running BOOLEAN NOT NULL DEFAULT FALSE")
+        await conn.execute("ALTER TABLE game_clock ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ")
+        await conn.execute("ALTER TABLE game_clock ADD COLUMN IF NOT EXISTS elapsed_seconds BIGINT NOT NULL DEFAULT 0")
+        await conn.execute("""
+            INSERT INTO game_clock (id, game_year, season, is_running, started_at, elapsed_seconds)
+            VALUES (1, 129, 'spring', FALSE, NULL, 0) ON CONFLICT (id) DO NOTHING
+        """)
+        needs_clock_seed = not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'game-clock-canon-start-v1')"
+        )
+        if needs_clock_seed:
+            await conn.execute("""
+                UPDATE game_clock SET game_year = 129, season = 'spring', is_running = FALSE,
+                    started_at = NULL, elapsed_seconds = 0 WHERE id = 1
+            """)
+            await conn.execute("INSERT INTO app_migrations (migration_key) VALUES ('game-clock-canon-start-v1') ON CONFLICT DO NOTHING")
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
                 id BIGSERIAL PRIMARY KEY,
                 sender_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -1624,6 +1723,9 @@ def create_app():
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
+    app.router.add_get("/api/game-clock", game_clock_handler)
+    app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
+    app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
     app.router.add_get("/api/family", family_handler)
     app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
     app.router.add_get("/api/court/appointments", court_appointments_handler)
