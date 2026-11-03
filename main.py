@@ -1792,18 +1792,33 @@ async def on_startup(app):
                 ('Lord Reynald Darklyn', 'لرد خاندان دارکلین', NULL, 'دارکلین', 'داسکندیل', 65, 70, 75, 78, 50)
             ON CONFLICT (character_name) DO NOTHING
         """)
-        # Import every character already registered in the bot's travel rosters.
-        # Only use facts present in that roster; do not invent ages, biographies,
-        # houses, titles, or private skill values.
+        # Ensure every character in the bot's registered travel rosters has a
+        # ready-to-claim profile, even when no player owns the character yet.
+        # Unknown lore fields are explicit placeholders, never guessed facts.
         for castle_name, roster in TRAVEL_CHARACTER_ROSTER.items():
             for roster_entry in roster:
                 character_name = str(roster_entry).split("|")[-1].strip()
                 if not character_name:
                     continue
                 await conn.execute("""
-                    INSERT INTO character_profiles (character_name, location)
-                    VALUES ($1, $2)
-                    ON CONFLICT (character_name) DO NOTHING
+                    INSERT INTO character_profiles
+                        (character_name, biography, age, health, title, location,
+                         spouse, children, dragon, house)
+                    VALUES
+                        ($1, 'شرح کامل این شخصیت هنوز توسط مدیر بازی ثبت نشده است.',
+                         'نیازمند تعیین', 'نیازمند تعیین', 'نیازمند تعیین', $2,
+                         'نیازمند تعیین', 'نیازمند تعیین', 'نیازمند تعیین',
+                         'نیازمند تعیین')
+                    ON CONFLICT (character_name) DO UPDATE SET
+                        biography = COALESCE(character_profiles.biography, EXCLUDED.biography),
+                        age = COALESCE(character_profiles.age, EXCLUDED.age),
+                        health = COALESCE(character_profiles.health, EXCLUDED.health),
+                        title = COALESCE(character_profiles.title, EXCLUDED.title),
+                        location = COALESCE(character_profiles.location, EXCLUDED.location),
+                        spouse = COALESCE(character_profiles.spouse, EXCLUDED.spouse),
+                        children = COALESCE(character_profiles.children, EXCLUDED.children),
+                        dragon = COALESCE(character_profiles.dragon, EXCLUDED.dragon),
+                        house = COALESCE(character_profiles.house, EXCLUDED.house)
                 """, character_name, castle_name)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_clock (
