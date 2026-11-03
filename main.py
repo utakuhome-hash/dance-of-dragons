@@ -445,7 +445,7 @@ async def castle_members_handler(request):
 
 def normalize_court_name(value):
     value = str(value or "").lower().replace("ي", "ی").replace("ك", "ک")
-    return "".join(ch for ch in value if not ch.isspace() and ch not in "\\u200c-'’_")
+    return "".join(ch for ch in value if not ch.isspace() and ord(ch) != 8204 and ch not in "-'’_")
 
 
 def court_posts_for_castle(castle_name):
