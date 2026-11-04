@@ -2055,6 +2055,122 @@ async def read_game_clock(conn):
     }
 
 
+
+def _json_object(value):
+    if isinstance(value, str):
+        import json
+        try: value = json.loads(value)
+        except (TypeError, ValueError): value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def _level(buildings, name):
+    def norm(v):
+        return str(v or "").replace("\u200c", "").replace(" ", "").replace("ي", "ی").replace("ك", "ک")
+    target = norm(name)
+    for key, value in buildings.items():
+        if norm(key) == target:
+            try: return max(0, min(5, int(value)))
+            except (ValueError, TypeError): return 0
+    return 0
+
+
+def _apply_house_annual_income(state, elapsed):
+    resources = state.setdefault("resources", {})
+    special = resources.setdefault("specialGoods", {})
+    buildings = state.setdefault("buildings", {})
+    standard = [
+        ("ماهیگیری", "food", 8, 1), ("مزرعه", "food", 12, 1),
+        ("چوب‌بری", "wood", 14, 2), ("معدن سنگ", "stone", 8, 3),
+        ("معدن آهن", "iron", 5, 4), ("بازار", "coins", 500, 2),
+        ("شهر", "subjects", 3, 5),
+    ]
+    totals = {}
+    upkeep = 0
+    for name, key, base, food_cost in standard:
+        level = _level(buildings, name)
+        totals[key] = totals.get(key, 0) + level * base * elapsed
+        upkeep += level * food_cost * elapsed
+    special_buildings = [
+        ("شکارگاه", "fur", [60,105,165,240,330]),
+        ("دامداری پشمی", "wool", [90,165,255,375,525]),
+        ("تاکستان", "wine", [75,135,210,300,420]),
+        ("پرورشگاه اسب جنگی", "warhorses", [3,6,9,15,21]),
+        ("باغ ادویه", "spice", [60,105,165,240,345]),
+        ("نمک‌زار", "salt", [90,165,255,375,510]),
+    ]
+    for name, key, yields in special_buildings:
+        level = _level(buildings, name)
+        if level:
+            special[key] = int(special.get(key, 0) or 0) + yields[level-1] * elapsed
+    for key, amount in totals.items():
+        resources[key] = int(resources.get(key, 0) or 0) + amount
+    resources["food"] = max(0, int(resources.get("food", 0) or 0) - upkeep)
+    state["resources"] = resources
+    state["buildings"] = buildings
+    return state
+
+
+async def my_house_state_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("house_not_assigned", 409)
+    import json
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT game_state FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
+            if not row:
+                return json_error("house_not_found", 404)
+            state = _json_object(row["game_state"])
+            clock = await read_game_clock(conn)
+            if clock and clock.get("is_running"):
+                year = int(clock["game_year"])
+                last_year = int(state.get("_lastIncomeYear", year) or year)
+                elapsed = max(0, year - last_year)
+                if elapsed:
+                    state = _apply_house_annual_income(state, elapsed)
+                    state["_lastIncomeYear"] = year
+                    await conn.execute("UPDATE houses SET game_state=$1::jsonb WHERE id=$2",
+                        json.dumps(state, ensure_ascii=False), player["house_id"])
+    return web.json_response({"ok": True, "state": state, "game_year": clock["game_year"] if clock else None})
+
+
+async def my_house_state_update_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("house_not_assigned", 409)
+    import json
+    try:
+        data = await request.json()
+        if not isinstance(data, dict): return json_error("invalid_state")
+        incoming = {}
+        for key in ("resources", "buildings", "queue"):
+            value = data.get(key)
+            if not isinstance(value, (dict, list)): return json_error("invalid_state")
+            incoming[key] = value
+        for key in ("wood","stone","iron","coins","food","subjects","warhorses"):
+            if key in incoming["resources"]:
+                raw = incoming["resources"][key]
+                if isinstance(raw, bool) or int(raw) < 0: return json_error("invalid_resource_amount")
+                incoming["resources"][key] = int(raw)
+        if len(incoming["queue"]) > 2: return json_error("invalid_build_queue")
+    except (ValueError, TypeError):
+        return json_error("invalid_state")
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT game_state FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
+            if not row: return json_error("house_not_found", 404)
+            current = _json_object(row["game_state"])
+            current.update(incoming)
+            await conn.execute("UPDATE houses SET game_state=$1::jsonb WHERE id=$2",
+                json.dumps(current, ensure_ascii=False), player["house_id"])
+    return web.json_response({"ok": True})
+
+
 async def game_clock_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
@@ -2379,6 +2495,7 @@ async def on_startup(app):
         """)
         await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS resources JSONB NOT NULL DEFAULT '{}'::jsonb")
         await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS annual_income JSONB NOT NULL DEFAULT '{}'::jsonb")
+        await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS game_state JSONB NOT NULL DEFAULT '{}'::jsonb")
         # Bootstrap the player tables on a brand-new database before any queries use them.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS players (
@@ -2817,6 +2934,8 @@ def create_app():
     app.router.add_get("/api/profiles/{profile_id}", profile_detail_handler)
     app.router.add_put("/api/admin/profiles/{profile_id}", admin_update_profile_handler)
     app.router.add_put("/api/admin/profiles/{profile_id}/owner", admin_assign_profile_owner_handler)
+    app.router.add_get("/api/my-house/state", my_house_state_handler)
+    app.router.add_put("/api/my-house/state", my_house_state_update_handler)
     app.router.add_get("/api/game-clock", game_clock_handler)
     app.router.add_get("/api/game-state-control", game_state_control_handler)
     app.router.add_post("/api/admin/game-state/reset", admin_reset_game_state_handler)
