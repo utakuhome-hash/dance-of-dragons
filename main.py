@@ -1377,10 +1377,69 @@ async def admin_houses_handler(request):
     if error:
         return error
     async with request.app["db"].acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, name, castle FROM houses ORDER BY name"
+        rows = await conn.fetch("SELECT id, name, castle, treasury, food, resources, annual_income FROM houses ORDER BY name")
+    houses = []
+    for row in rows:
+        item = dict(row)
+        for field in ("resources", "annual_income"):
+            value = item.get(field) or {}
+            if isinstance(value, str):
+                import json
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError):
+                    value = {}
+            item[field] = value
+        houses.append(item)
+    return web.json_response({"ok": True, "houses": houses})
+
+
+async def admin_update_house_economy_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    import json
+    try:
+        house_id = int(request.match_info["house_id"])
+        data = await request.json()
+        allowed = {"wood","stone","iron","coins","food","subjects","warhorses","fur","wool","wine","spice","black_iron","salt"}
+        cleaned = []
+        for field in ("resources", "annual_income"):
+            source = data.get(field, {})
+            if not isinstance(source, dict):
+                return json_error("invalid_economy_data")
+            values = {}
+            for key, raw in source.items():
+                if key not in allowed or isinstance(raw, bool):
+                    return json_error("invalid_resource_category")
+                amount = int(raw)
+                if amount < 0 or amount > 9000000000000:
+                    return json_error("invalid_resource_amount")
+                values[key] = amount
+            cleaned.append(values)
+        resources, annual_income = cleaned
+    except (ValueError, TypeError):
+        return json_error("invalid_economy_data")
+    async with request.app["db"].acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE houses
+               SET resources = $1::jsonb, annual_income = $2::jsonb,
+                   treasury = COALESCE(($1::jsonb->>'coins')::bigint, treasury),
+                   food = COALESCE(($1::jsonb->>'food')::bigint, food)
+               WHERE id = $3
+               RETURNING id, name, treasury, food, resources, annual_income""",
+            json.dumps(resources, ensure_ascii=False),
+            json.dumps(annual_income, ensure_ascii=False),
+            house_id,
         )
-    return web.json_response({"ok": True, "houses": [dict(row) for row in rows]})
+    if not row:
+        return json_error("house_not_found", 404)
+    result = dict(row)
+    for field in ("resources", "annual_income"):
+        value = result.get(field) or {}
+        if isinstance(value, str):
+            result[field] = json.loads(value)
+    return web.json_response({"ok": True, "house": result})
 
 
 async def admin_assign_castle_handler(request):
@@ -2197,6 +2256,8 @@ async def on_startup(app):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS resources JSONB NOT NULL DEFAULT '{}'::jsonb")
+        await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS annual_income JSONB NOT NULL DEFAULT '{}'::jsonb")
         # Bootstrap the player tables on a brand-new database before any queries use them.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS players (
@@ -2637,6 +2698,7 @@ def create_app():
     app.router.add_get("/api/admin/login-requests", admin_login_requests_handler)
     app.router.add_post("/api/admin/login-requests/{telegram_id}/assign", admin_assign_login_request_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
+    app.router.add_put("/api/admin/houses/{house_id}/economy", admin_update_house_economy_handler)
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
