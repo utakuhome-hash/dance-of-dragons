@@ -1168,8 +1168,10 @@ async def military_requests_handler(request):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
         profiles = await conn.fetch("""
-            SELECT id, character_name, title, location, house, warfare, owner_player_id
-            FROM character_profiles WHERE owner_player_id IS NOT NULL ORDER BY character_name
+            SELECT cp.id, cp.character_name, cp.title, cp.location, cp.house, cp.warfare,
+                   cp.owner_player_id, p.house_id AS owner_house_id
+            FROM character_profiles cp JOIN players p ON p.id = cp.owner_player_id
+            ORDER BY cp.character_name
         """)
         requests = await conn.fetch("""
             SELECT m.*, s.username AS sender_name, r.username AS recipient_name
@@ -1186,7 +1188,7 @@ async def military_requests_handler(request):
                 value[field] = value[field].isoformat()
         request_items.append(value)
     return web.json_response({"ok":True,"profiles":[dict(x) for x in profiles],
-        "requests":request_items,"player_id":player["id"],"username":player["username"]})
+        "requests":request_items,"player_id":player["id"],"username":player["username"],"house_id":player.get("house_id")})
 
 
 async def military_campaign_create_handler(request):
@@ -1211,13 +1213,16 @@ async def military_campaign_create_handler(request):
     if kind!="self":
         if not profile_id: return json_error("commander_required")
         async with request.app["db"].acquire() as conn:
-            profile=await conn.fetchrow("SELECT id,character_name,owner_player_id,warfare FROM character_profiles WHERE id=$1",profile_id)
+            profile=await conn.fetchrow("SELECT cp.id,cp.character_name,cp.owner_player_id,cp.warfare,p.house_id AS owner_house_id
+             FROM character_profiles cp JOIN players p ON p.id=cp.owner_player_id WHERE cp.id=$1",profile_id)
         if not profile or not profile["owner_player_id"]: return json_error("commander_not_found",404)
-        if kind in {"member","hero"} and profile["owner_player_id"]!=player["id"]:
-            return json_error("commander_not_owned",403)
+        if kind in {"member","hero"} and profile["owner_house_id"]!=player.get("house_id"):
+            return json_error("commander_not_in_house",403)
+        if kind == "external" and profile["owner_house_id"] == player.get("house_id"):
+            return json_error("external_commander_must_be_from_another_house",400)
         if kind=="hero" and int(profile["warfare"] or 0)<70: return json_error("commander_not_qualified")
         commander_id=profile["owner_player_id"]; commander_name=profile["character_name"]
-    status="pending_commander" if commander_id!=player["id"] else ("awaiting_destination" if not target else "dispatched")
+    status="pending_commander" if kind=="external" else ("awaiting_destination" if not target else "dispatched")
     async with request.app["db"].acquire() as conn:
         row=await conn.fetchrow("""
             INSERT INTO military_campaigns
