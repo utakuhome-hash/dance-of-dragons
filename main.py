@@ -1774,12 +1774,18 @@ async def read_game_clock(conn):
     seasons = [("spring", "بهار", "🌱"), ("summer", "تابستان", "☀️"),
                ("autumn", "پاییز", "🍂"), ("winter", "زمستان", "❄️")]
     season_key, season_label, season_icon = seasons[int((total_seconds % 691200) // 172800)]
+    game_year = int(row["game_year"]) + (total_seconds // 86400)
+    is_peace_period = game_year < 136  # Years 129–135 AC: the first seven game years.
     return {
-        "game_year": int(row["game_year"]) + (total_seconds // 86400),
+        "game_year": game_year,
         "season": season_key, "season_label": season_label, "season_icon": season_icon,
         "is_running": bool(row["is_running"]), "total_elapsed_seconds": total_seconds,
         "seconds_until_season": 172800 - (total_seconds % 172800),
         "seconds_until_year": 86400 - (total_seconds % 86400),
+        "is_peace_period": is_peace_period,
+        "peace_years_remaining": max(0, 136 - game_year),
+        "campaigns_allowed": not is_peace_period,
+        "peace_ends_at_year": 136,
     }
 
 
