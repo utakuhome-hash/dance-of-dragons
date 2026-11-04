@@ -224,6 +224,26 @@ async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{Author
    // Keep the last known server state; a temporary API failure is not a game pause.
    console.warn('Game clock sync unavailable; preserving last known running state.',clockResult.reason);
   }
+  if(player&&player.house_id){
+   try{
+    const shared=await api('/api/my-house/state');
+    const remote=shared.state||{},hasRemote=remote.resources&&remote.buildings&&Object.keys(remote).length>0;
+    let local=null;try{local=JSON.parse(localStorage.getItem(scopedKey)||'null')}catch(e){}
+    const localStamp=Number(localStorage.getItem('dod_house_local_updated_'+player.house_id)||0);
+    const remoteStamp=Date.parse(shared.updated_at||'')||0;
+    if(hasRemote&&local&&localStamp>remoteStamp){
+     await api('/api/my-house/state',{method:'PUT',body:JSON.stringify({resources:local.resources||{},buildings:local.buildings||{},queue:local.queue||[]})});
+    }else if(hasRemote){
+     const merged={...(local||{}),resources:{...((local&&local.resources)||{}),...(remote.resources||{})},buildings:{...((local&&local.buildings)||{}),...(remote.buildings||{})},queue:Array.isArray(remote.queue)?remote.queue:((local&&local.queue)||[])};
+     localStorage.setItem(scopedKey,JSON.stringify(merged));
+     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(remoteStamp||Date.now()));
+     const target=document.getElementById('view');if(target&&target.contentWindow){target.contentWindow.dispatchEvent(new Event('dod-state-change'));target.contentWindow.DOD?.refreshDashboard?.();}
+    }else if(local){
+     const seeded=await api('/api/my-house/state',{method:'PUT',body:JSON.stringify({resources:local.resources||{},buildings:local.buildings||{},queue:local.queue||[]})});
+     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(Date.now()));
+    }
+   }catch(e){console.warn('Shared house warehouse sync unavailable:',e);}
+  }
   const frame=document.getElementById('view');
   if(frame&&frame.contentWindow){
    const message={type:'dod-game-state'};
