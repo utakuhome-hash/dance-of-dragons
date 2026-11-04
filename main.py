@@ -2075,7 +2075,57 @@ def _level(buildings, name):
     return 0
 
 
-def _apply_house_annual_income(state, elapsed):
+def _house_special_region(house_name):
+    name = str(house_name or "").replace("\u200c", "").replace(" ", "")
+    regions = {
+        "استارک":"north", "کارستارک":"north", "داستین":"north", "آمبر":"north",
+        "آرین":"vale", "رویس":"vale", "کوربری":"vale",
+        "گریجوی":"iron", "هارلاو":"iron", "گودبروتر":"iron", "بلک‌تاید":"iron", "بلکتاید":"iron",
+        "تالی":"river", "فری":"river", "برکن":"river", "بلک‌وود":"river",
+        "لنیستر":"west", "کراکهال":"west", "لفورد":"west",
+        "تارگرین":"crown", "سیلتیگار":"crown", "ولاریون":"crown", "دارکلین":"crown",
+        "بارثیون":"storm", "کارون":"storm", "فل":"storm", "سوان":"storm",
+        "تایرل":"reach", "ردواین":"reach", "های‌تاور":"reach", "تارلی":"reach",
+        "مارتل":"dorne", "مارتل‌ها":"dorne", "دین":"dorne", "یرونوود":"dorne", "آلیرین":"dorne", "فاولر":"dorne",
+    }
+    return regions.get(name)
+
+
+def _settle_house_build_queue(state, now_ms):
+    queue = state.get("queue")
+    if not isinstance(queue, list) or not queue:
+        return False
+    buildings = state.setdefault("buildings", {})
+    remaining = []
+    changed = False
+    for job in queue:
+        if not isinstance(job, dict):
+            changed = True
+            continue
+        try:
+            started = float(job.get("started") or 0)
+            duration = float(job.get("duration") or 0)
+        except (TypeError, ValueError):
+            remaining.append(job)
+            continue
+        if started <= 0 or duration <= 0 or now_ms < started + duration:
+            remaining.append(job)
+            continue
+        name = str(job.get("name") or "")
+        current = _level(buildings, name)
+        try:
+            target = int(job.get("targetLevel") or (current + 1))
+        except (TypeError, ValueError):
+            target = current + 1
+        if name and current < 5 and current < target <= 5:
+            buildings[name] = target
+        changed = True
+    if changed:
+        state["queue"] = remaining
+    return changed
+
+
+def _apply_house_annual_income(state, elapsed, special_region=None):
     resources = state.setdefault("resources", {})
     special = resources.setdefault("specialGoods", {})
     buildings = state.setdefault("buildings", {})
@@ -2092,14 +2142,17 @@ def _apply_house_annual_income(state, elapsed):
         totals[key] = totals.get(key, 0) + level * base * elapsed
         upkeep += level * food_cost * elapsed
     special_buildings = [
-        ("شکارگاه", "fur", [60,105,165,240,330]),
-        ("دامداری پشمی", "wool", [90,165,255,375,525]),
-        ("تاکستان", "wine", [75,135,210,300,420]),
-        ("پرورشگاه اسب جنگی", "warhorses", [3,6,9,15,21]),
-        ("باغ ادویه", "spice", [60,105,165,240,345]),
-        ("نمک‌زار", "salt", [90,165,255,375,510]),
+        ("north", "شکارگاه", "fur", [60,105,165,240,330]),
+        ("vale", "دامداری پشمی", "wool", [90,165,255,375,525]),
+        ("reach", "تاکستان", "wine", [75,135,210,300,420]),
+        ("storm", "پرورشگاه اسب جنگی", "warhorses", [3,6,9,15,21]),
+        ("dorne", "باغ ادویه", "spice", [60,105,165,240,345]),
+        ("crown", "نمک‌زار", "salt", [90,165,255,375,510]),
+        ("iron", "معدن آهن سیاه", "blackIron", [45,90,150,225,315]),
     ]
-    for name, key, yields in special_buildings:
+    for region, name, key, yields in special_buildings:
+        if special_region != region:
+            continue
         level = _level(buildings, name)
         if level:
             special[key] = int(special.get(key, 0) or 0) + yields[level-1] * elapsed
@@ -2126,16 +2179,23 @@ async def my_house_state_handler(request):
             state = _json_object(row["game_state"])
             updated_at = row["game_state_updated_at"]
             clock = await read_game_clock(conn)
+            changed = False
             if clock and clock.get("is_running"):
+                import time
+                changed = _settle_house_build_queue(state, time.time() * 1000) or changed
                 year = int(clock["game_year"])
                 last_year = int(state.get("_lastIncomeYear", year) or year)
                 elapsed = max(0, year - last_year)
                 if elapsed:
-                    state = _apply_house_annual_income(state, elapsed)
+                    state = _apply_house_annual_income(
+                        state, elapsed, _house_special_region(player.get("house_name"))
+                    )
                     state["_lastIncomeYear"] = year
-                    await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
-                        json.dumps(state, ensure_ascii=False), player["house_id"])
-                    updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
+                    changed = True
+            if changed:
+                await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
+                    json.dumps(state, ensure_ascii=False), player["house_id"])
+                updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
     return web.json_response({"ok": True, "state": state, "updated_at": updated_at.isoformat() if updated_at else None, "game_year": clock["game_year"] if clock else None})
 
 
