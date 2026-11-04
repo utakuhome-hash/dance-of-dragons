@@ -1805,7 +1805,7 @@ async def game_state_control_handler(request):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT c.reset_version, g.is_running
+            SELECT c.reset_version, c.economy_reset_version, g.is_running
             FROM game_state_control c
             CROSS JOIN game_clock g
             WHERE c.id = 1 AND g.id = 1
@@ -1815,6 +1815,7 @@ async def game_state_control_handler(request):
     return web.json_response({
         "ok": True,
         "reset_version": int(row["reset_version"]),
+        "economy_reset_version": int(row["economy_reset_version"]),
         "is_running": bool(row["is_running"]),
     })
 
@@ -1850,6 +1851,29 @@ async def admin_reset_game_state_handler(request):
         "season": "spring",
         "is_running": False,
         "message": "game_state_reset_to_defaults",
+    })
+
+
+async def admin_reset_economy_handler(request):
+    player, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT economy_reset_version FROM game_state_control WHERE id = 1 FOR UPDATE"
+            )
+            if not row:
+                return json_error("game_state_control_unavailable", 503)
+            next_version = int(row["economy_reset_version"]) + 1
+            await conn.execute(
+                "UPDATE game_state_control SET economy_reset_version = $1, updated_at = NOW() WHERE id = 1",
+                next_version,
+            )
+    return web.json_response({
+        "ok": True,
+        "economy_reset_version": next_version,
+        "message": "player_resources_and_buildings_reset_requested",
     })
 
 
@@ -2252,6 +2276,9 @@ async def on_startup(app):
             INSERT INTO game_state_control (id, reset_version)
             VALUES (1, 0) ON CONFLICT (id) DO NOTHING
         """)
+        await conn.execute(
+            "ALTER TABLE game_state_control ADD COLUMN IF NOT EXISTS economy_reset_version BIGINT NOT NULL DEFAULT 0"
+        )
         needs_clock_seed = not await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'game-clock-canon-start-v1')"
         )
@@ -2318,17 +2345,7 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
-        # The existing shared inbox contents were demonstration letters. Clear
-        # that initial batch once; letters sent after this migration are kept.
-        needs_demo_mail_cleanup = not await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE migration_key = 'clear-shared-demo-letters-v1')"
-        )
-        if needs_demo_mail_cleanup:
-            await conn.execute("DELETE FROM game_letters")
-            await conn.execute("""
-                INSERT INTO app_migrations (migration_key)
-                VALUES ('clear-shared-demo-letters-v1') ON CONFLICT DO NOTHING
-            """)
+        # Preserve existing and future player letters; never clear the mailbox at startup.
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS court_appointments (
@@ -2418,6 +2435,7 @@ def create_app():
     app.router.add_get("/api/game-clock", game_clock_handler)
     app.router.add_get("/api/game-state-control", game_state_control_handler)
     app.router.add_post("/api/admin/game-state/reset", admin_reset_game_state_handler)
+    app.router.add_post("/api/admin/economy/reset", admin_reset_economy_handler)
     app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
     app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
     app.router.add_get("/api/family", family_handler)
