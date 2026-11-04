@@ -1227,7 +1227,14 @@ async def admin_login_requests_handler(request):
             ORDER BY r.last_seen_at DESC
             LIMIT 100
         """)
-    return web.json_response({"ok": True, "requests": [dict(row) for row in rows]})
+    requests = []
+    for row in rows:
+        item = dict(row)
+        for field in ("first_seen_at", "last_seen_at"):
+            if item.get(field) is not None:
+                item[field] = item[field].isoformat()
+        requests.append(item)
+    return web.json_response({"ok": True, "requests": requests})
 
 
 async def admin_assign_login_request_handler(request):
