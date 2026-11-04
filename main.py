@@ -266,7 +266,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v2")
         )]
     ])
     return keyboard
@@ -2283,6 +2283,7 @@ def create_app():
 
     app.router.add_get("/", index_handler)
     app.router.add_get("/app", index_handler)
+    app.router.add_get("/app-v2", index_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
