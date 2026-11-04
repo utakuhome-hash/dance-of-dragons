@@ -424,7 +424,7 @@ async def auth_handler(request):
         forwarded_ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         ip_address = (forwarded_ip or request.remote or "")[:64] or None
         user_agent = request.headers.get("User-Agent", "")[:1000] or None
-        install_id = str(data.get("install_id", "")).strip()[:80] or None
+        install_id = str(data.get("install_id") or request.headers.get("X-Game-Install-ID", "")).strip()[:80] or None
         await conn.execute(
             """
             INSERT INTO player_sessions
@@ -2019,13 +2019,23 @@ async def public_profiles_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
+    is_admin = bool(player.get("is_super_admin") and player.get("role") == "admin")
     async with request.app["db"].acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, character_name, title, location, house
-            FROM character_profiles
-            WHERE owner_player_id IS NOT NULL
-            ORDER BY character_name
-        """)
+        if is_admin:
+            # Admin's new-player form must offer the full roster, including
+            # characters that have not been assigned to any player yet.
+            rows = await conn.fetch("""
+                SELECT id, character_name, title, location, house
+                FROM character_profiles
+                ORDER BY character_name
+            """)
+        else:
+            rows = await conn.fetch("""
+                SELECT id, character_name, title, location, house
+                FROM character_profiles
+                WHERE owner_player_id IS NOT NULL
+                ORDER BY character_name
+            """)
     return web.json_response({"ok": True, "profiles": [dict(row) for row in rows]})
 
 
