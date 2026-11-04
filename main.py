@@ -690,7 +690,10 @@ TRAVEL_CHARACTER_ROSTER = {
         "رینیس تارگرین | Rhaenys Targaryen",
         "هیو همر | Hugh Hammer",
         "اریک کارگیل | Erryk Cargyll",
-        "آدام ولاریون | Addam Velaryon"
+        "آدام ولاریون | Addam Velaryon",
+        "سر لورنت ماربریند | Ser Lorent Marbrand",
+        "سر ویلیام رویس | Ser Willam Royce",
+        "سر استفون دارکلین | Ser Steffon Darklyn"
     ],
     "کینگزلندینگ": [
         "اگان دوم تارگرین | Aegon II Targaryen",
@@ -1951,6 +1954,7 @@ async def public_profiles_list_handler(request):
         rows = await conn.fetch("""
             SELECT id, character_name, title, location, house
             FROM character_profiles
+            WHERE owner_player_id IS NOT NULL
             ORDER BY character_name
         """)
     return web.json_response({"ok": True, "profiles": [dict(row) for row in rows]})
@@ -2301,6 +2305,13 @@ async def on_startup(app):
                         dragon = COALESCE(character_profiles.dragon, EXCLUDED.dragon),
                         house = COALESCE(character_profiles.house, EXCLUDED.house)
                 """, character_name, castle_name)
+        # Daeron's canonical seat is Oldtown; correct any legacy profile location
+        # so every public/profile view uses the same castle.
+        await conn.execute("""
+            UPDATE character_profiles
+            SET location = 'اولدتاون', updated_at = NOW()
+            WHERE character_name = 'Daeron Targaryen'
+        """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_clock (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
