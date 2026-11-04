@@ -2120,7 +2120,7 @@ async def my_house_state_handler(request):
     import json
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow("SELECT game_state FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
+            row = await conn.fetchrow("SELECT game_state, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
             if not row:
                 return json_error("house_not_found", 404)
             state = _json_object(row["game_state"])
@@ -2132,9 +2132,9 @@ async def my_house_state_handler(request):
                 if elapsed:
                     state = _apply_house_annual_income(state, elapsed)
                     state["_lastIncomeYear"] = year
-                    await conn.execute("UPDATE houses SET game_state=$1::jsonb WHERE id=$2",
+                    await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
                         json.dumps(state, ensure_ascii=False), player["house_id"])
-    return web.json_response({"ok": True, "state": state, "game_year": clock["game_year"] if clock else None})
+    return web.json_response({"ok": True, "state": state, "updated_at": row["game_state_updated_at"].isoformat() if row["game_state_updated_at"] else None, "game_year": clock["game_year"] if clock else None})
 
 
 async def my_house_state_update_handler(request):
@@ -2496,6 +2496,7 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS resources JSONB NOT NULL DEFAULT '{}'::jsonb")
         await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS annual_income JSONB NOT NULL DEFAULT '{}'::jsonb")
         await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS game_state JSONB NOT NULL DEFAULT '{}'::jsonb")
+        await conn.execute("ALTER TABLE houses ADD COLUMN IF NOT EXISTS game_state_updated_at TIMESTAMPTZ")
         # Bootstrap the player tables on a brand-new database before any queries use them.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS players (
