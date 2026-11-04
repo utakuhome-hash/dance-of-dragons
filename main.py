@@ -1216,8 +1216,15 @@ async def admin_players_handler(request):
                        COALESCE((SELECT COUNT(DISTINCT s3.player_id)
                                  FROM player_sessions s3
                                  WHERE s3.install_id = ls.install_id
-                                   AND s3.install_id IS NOT NULL
-                                   AND s3.created_at > NOW() - INTERVAL '30 days'), 0) AS install_account_count
+                                   AND s3.install_id IS NOT NULL), 0) AS install_account_count,
+                       COALESCE((SELECT json_agg(json_build_object('id', linked.id, 'username', linked.username) ORDER BY linked.username)
+                                 FROM (
+                                   SELECT DISTINCT p2.id, p2.username
+                                   FROM player_sessions s3
+                                   JOIN players p2 ON p2.id = s3.player_id
+                                   WHERE s3.install_id = ls.install_id
+                                     AND ls.install_id IS NOT NULL
+                                 ) linked), '[]'::json) AS install_accounts
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
@@ -1251,8 +1258,15 @@ async def admin_players_handler(request):
                        COALESCE((SELECT COUNT(DISTINCT s3.player_id)
                                  FROM player_sessions s3
                                  WHERE s3.install_id = ls.install_id
-                                   AND s3.install_id IS NOT NULL
-                                   AND s3.created_at > NOW() - INTERVAL '30 days'), 0) AS install_account_count
+                                   AND s3.install_id IS NOT NULL), 0) AS install_account_count,
+                       COALESCE((SELECT json_agg(json_build_object('id', linked.id, 'username', linked.username) ORDER BY linked.username)
+                                 FROM (
+                                   SELECT DISTINCT p2.id, p2.username
+                                   FROM player_sessions s3
+                                   JOIN players p2 ON p2.id = s3.player_id
+                                   WHERE s3.install_id = ls.install_id
+                                     AND ls.install_id IS NOT NULL
+                                 ) linked), '[]'::json) AS install_accounts
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
@@ -2010,7 +2024,7 @@ async def profiles_list_handler(request):
         players = []
         if is_admin:
             players = [dict(r) for r in await conn.fetch(
-                "SELECT id, username FROM players WHERE is_active = TRUE ORDER BY username"
+                "SELECT id, username FROM players ORDER BY username"
             )]
     return web.json_response({"ok": True, "profiles": profiles, "is_admin": is_admin, "players": players})
 
