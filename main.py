@@ -1137,13 +1137,26 @@ async def me_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
         return json_error("unauthorized", 401)
-    install_id = request.headers.get("X-Game-Install-ID", "").strip()[:80]
+    install_id = request.headers.get("X-Game-Install-ID", "").strip()[:80] or None
     token = get_bearer_token(request)
-    if install_id and token:
+    if token:
+        ip_address = (
+            request.headers.get("X-Real-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote
+        )
+        ip_address = str(ip_address)[:64] if ip_address else None
+        user_agent = request.headers.get("User-Agent", "")[:1000] or None
         async with request.app["db"].acquire() as conn:
             await conn.execute(
-                "UPDATE player_sessions SET install_id = $1 WHERE session_token_hash = $2 AND revoked_at IS NULL",
-                install_id, hash_session_token(token),
+                """
+                UPDATE player_sessions
+                SET install_id = COALESCE($1, install_id),
+                    ip_address = COALESCE($2, ip_address),
+                    user_agent = COALESCE($3, user_agent)
+                WHERE session_token_hash = $4 AND revoked_at IS NULL
+                """,
+                install_id, ip_address, user_agent, hash_session_token(token),
             )
     return web.json_response({"ok": True, "player": player})
 
