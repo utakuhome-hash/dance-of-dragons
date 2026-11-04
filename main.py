@@ -1920,7 +1920,15 @@ async def admin_assign_profile_owner_handler(request):
 
 
 async def index_handler(request):
-    return web.FileResponse(WEBAPP_FILE)
+    # Always revalidate the game shell so embedded browsers do not keep an old menu/pages bundle.
+    return web.FileResponse(
+        WEBAPP_FILE,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 async def on_startup(app):
