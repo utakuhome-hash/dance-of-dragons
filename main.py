@@ -2287,6 +2287,15 @@ async def on_cleanup(app):
     await bot.session.close()
 
 
+async def webapp_fallback_handler(request):
+    # Telegram clients may keep an older WebApp path; serve the game shell for
+    # unknown browser paths while preserving real 404s for unknown API routes.
+    if request.path == WEBHOOK_PATH or request.path.startswith("/api/"):
+        raise web.HTTPNotFound()
+    logging.warning("WebApp fallback served for path: %s", request.path)
+    return await index_handler(request)
+
+
 def create_app():
     app = web.Application(client_max_size=1024 * 1024)
 
@@ -2295,6 +2304,7 @@ def create_app():
     app.router.add_get("/app-v2", index_handler)
     app.router.add_get("/app-v3", index_handler)
     app.router.add_get("/play-v4", index_handler)
+    app.router.add_get("/{tail:.*}", webapp_fallback_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
