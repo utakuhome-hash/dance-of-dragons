@@ -701,7 +701,7 @@ TRAVEL_CHARACTER_ROSTER = {
         "سر لوثر لارجنت | Ser Luthor Largent",
         "اریک کارگیل | Arryk Cargyll",
         "اولف وایت | Ulf White",
-        "سپتون اعظم | The High Septon"
+        "سپتون اعظم"
     ],
     "اولدتاون": [
         "دیرون تارگرین | Daeron Targaryen",
@@ -1433,10 +1433,19 @@ async def mail_players_handler(request):
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT p.id, p.username, p.house_id, h.name AS house_name
+            SELECT p.id, p.username, p.house_id, h.name AS house_name,
+                   COALESCE(
+                       ARRAY_AGG(DISTINCT cp.character_name ORDER BY cp.character_name)
+                           FILTER (WHERE cp.character_name IS NOT NULL),
+                       ARRAY[]::VARCHAR[]
+                   ) AS characters
             FROM players p
             LEFT JOIN houses h ON h.id = p.house_id
+            LEFT JOIN character_profiles cp
+              ON cp.owner_player_id = p.id
+              OR LOWER(cp.character_name) = LOWER(p.username)
             WHERE p.is_active = TRUE AND p.id <> $1
+            GROUP BY p.id, p.username, p.house_id, h.name
             ORDER BY p.username, p.id
             """,
             player["id"],
@@ -2238,6 +2247,25 @@ async def on_startup(app):
                 ('Bartimos Celtigar', 'لرد خاندان سلتیگار', NULL, 'سلتیگار', 'جزیره پنجه', 55, 75, 70, 78, 50),
                 ('Lord Reynald Darklyn', 'لرد خاندان دارکلین', NULL, 'دارکلین', 'داسکندیل', 65, 70, 75, 78, 50)
             ON CONFLICT (character_name) DO NOTHING
+        """)
+        await conn.execute("""
+            INSERT INTO character_profiles
+                (character_name, biography, title, location, house)
+            VALUES
+                ('سپتون اعظم',
+                 'رهبر عالی ایمان هفتگان و عالی‌ترین مقام مذهبی وستروس.',
+                 'سپتون اعظم', 'کینگزلندینگ', 'ایمان هفتگان')
+            ON CONFLICT (character_name) DO UPDATE SET
+                title = EXCLUDED.title,
+                location = EXCLUDED.location,
+                house = EXCLUDED.house,
+                biography = CASE
+                    WHEN character_profiles.biography IS NULL
+                      OR character_profiles.biography = 'شرح کامل این شخصیت هنوز توسط مدیر بازی ثبت نشده است.'
+                    THEN EXCLUDED.biography
+                    ELSE character_profiles.biography
+                END,
+                updated_at = NOW()
         """)
         # Ensure every character in the bot's registered travel rosters has a
         # ready-to-claim profile, even when no player owns the character yet.
