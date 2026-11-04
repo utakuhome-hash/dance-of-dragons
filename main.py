@@ -312,7 +312,13 @@ def validate_telegram_init_data(init_data: str):
         telegram_id = int(user.get("id", 0))
         if telegram_id <= 0:
             return None
-        return telegram_id, auth_date
+        safe_user = {
+            "id": telegram_id,
+            "username": str(user.get("username", ""))[:64],
+            "first_name": str(user.get("first_name", ""))[:128],
+            "last_name": str(user.get("last_name", ""))[:128],
+        }
+        return telegram_id, auth_date, safe_user
     except (ValueError, TypeError, KeyError):
         return None
 
@@ -374,7 +380,7 @@ async def auth_handler(request):
     if not validated:
         return json_error("telegram_auth_failed", 401)
 
-    telegram_id, auth_date = validated
+    telegram_id, auth_date, telegram_user = validated
     async with request.app["db"].acquire() as conn:
         player = await conn.fetchrow(
             """
@@ -388,6 +394,22 @@ async def auth_handler(request):
         )
 
         if not player:
+            await conn.execute(
+                """
+                INSERT INTO telegram_login_requests
+                    (telegram_id, telegram_username, first_name, last_name,
+                     first_seen_at, last_seen_at, attempt_count)
+                VALUES ($1, $2, $3, $4, NOW(), NOW(), 1)
+                ON CONFLICT (telegram_id) DO UPDATE
+                SET telegram_username = EXCLUDED.telegram_username,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    last_seen_at = NOW(),
+                    attempt_count = telegram_login_requests.attempt_count + 1
+                """,
+                telegram_id, telegram_user["username"],
+                telegram_user["first_name"], telegram_user["last_name"],
+            )
             return json_error("account_not_found", 404)
         if not player["is_active"]:
             return json_error("account_disabled", 403)
@@ -1191,6 +1213,72 @@ async def admin_players_handler(request):
     })
 
 
+async def admin_login_requests_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT r.telegram_id, r.telegram_username, r.first_name, r.last_name,
+                   r.first_seen_at, r.last_seen_at, r.attempt_count
+            FROM telegram_login_requests r
+            LEFT JOIN players p ON p.telegram_id = r.telegram_id
+            WHERE p.id IS NULL
+            ORDER BY r.last_seen_at DESC
+            LIMIT 100
+        """)
+    return web.json_response({"ok": True, "requests": [dict(row) for row in rows]})
+
+
+async def admin_assign_login_request_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        telegram_id = int(request.match_info["telegram_id"])
+        data = await request.json()
+        player_id = int(data.get("player_id", 0))
+    except (ValueError, TypeError):
+        return json_error("invalid_request")
+    if telegram_id <= 0 or player_id <= 0:
+        return json_error("invalid_request")
+    try:
+        async with request.app["db"].acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(739201847)")
+                pending = await conn.fetchrow(
+                    "SELECT telegram_id FROM telegram_login_requests WHERE telegram_id = $1 FOR UPDATE",
+                    telegram_id,
+                )
+                if not pending:
+                    return json_error("login_request_not_found", 404)
+                target = await conn.fetchrow(
+                    "SELECT id, username, is_active, is_super_admin FROM players WHERE id = $1 FOR UPDATE",
+                    player_id,
+                )
+                if not target:
+                    return json_error("player_not_found", 404)
+                if not target["is_active"]:
+                    return json_error("account_disabled", 403)
+                if target["is_super_admin"] and player_id != int(admin["id"]):
+                    return json_error("protected_account", 403)
+                await conn.execute(
+                    "UPDATE players SET telegram_id = $1 WHERE id = $2",
+                    telegram_id, player_id,
+                )
+                await conn.execute(
+                    "UPDATE player_sessions SET revoked_at = NOW() WHERE player_id = $1 AND revoked_at IS NULL",
+                    player_id,
+                )
+                await conn.execute(
+                    "DELETE FROM telegram_login_requests WHERE telegram_id = $1",
+                    telegram_id,
+                )
+        return web.json_response({"ok": True, "message": "telegram_id_linked"})
+    except asyncpg.UniqueViolationError:
+        return json_error("telegram_id_exists", 409)
+
+
 async def admin_houses_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -1983,6 +2071,21 @@ async def on_startup(app):
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
 
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_login_requests (
+                telegram_id BIGINT PRIMARY KEY,
+                telegram_username VARCHAR(64) NOT NULL DEFAULT '',
+                first_name VARCHAR(128) NOT NULL DEFAULT '',
+                last_name VARCHAR(128) NOT NULL DEFAULT '',
+                first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                attempt_count INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        await conn.execute(
+            "DELETE FROM telegram_login_requests WHERE last_seen_at < NOW() - INTERVAL '30 days'"
+        )
+
         # Provision the explicitly configured owner account as super-admin.
         super_admin_telegram_id = os.getenv("SUPER_ADMIN_TELEGRAM_ID", "").strip()
         if super_admin_telegram_id.isdigit() and int(super_admin_telegram_id) > 0:
@@ -2330,6 +2433,8 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/active", admin_set_player_active_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
+    app.router.add_get("/api/admin/login-requests", admin_login_requests_handler)
+    app.router.add_post("/api/admin/login-requests/{telegram_id}/assign", admin_assign_login_request_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
