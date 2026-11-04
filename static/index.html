@@ -45,7 +45,7 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
   <hr><h3>مدیریت بازیکن‌ها</h3><p>افزودن بازیکن جدید به بازی</p>
   <form id="addPlayerForm">
    <label>Telegram ID عددی</label><input id="newTelegramId" inputmode="numeric" pattern="[0-9]+" required>
-   <label for="newCharacterProfile">انتخاب شخصیت از فهرست</label><select id="newCharacterProfile" required style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></select><small style="display:block;color:#c9bda7;margin-top:5px">برای جلوگیری از اشتباه، شخصیت را از فهرست انتخاب کن.</small>
+   <label for="newCharacterProfile">نام شخصیت (می‌توانی تایپ کنی یا از فهرست پیشنهادها انتخاب کنی)</label><input id="newCharacterProfile" list="characterNameOptions" autocomplete="off" required placeholder="شروع به نوشتن نام شخصیت کن…" style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><datalist id="characterNameOptions"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></datalist><small style="display:block;color:#c9bda7;margin-top:5px">نام شخصیت را بنویس؛ پیشنهادهای فهرست هم هنگام تایپ نمایش داده می‌شوند.</small>
    <button type="submit">افزودن بازیکن</button><div id="adminFeedback" role="status"></div>
   </form><hr><h3>بازیکن‌های ثبت‌شده</h3><div id="playersList">در حال دریافت…</div>
  <hr><h3>ورودهای در انتظار بررسی</h3>
@@ -237,7 +237,8 @@ async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{Author
   catch(e){btn.title='فرمان اجرا نشد: '+e.message;}
   finally{btn.disabled=false;}
  }
- async function loadCharacterOptions(){const select=document.getElementById('newCharacterProfile');select.replaceChildren(new Option('در حال دریافت فهرست شخصیت‌ها…',''));try{const d=await api('/api/profiles/public');select.replaceChildren(new Option('یک شخصیت را انتخاب کن',''));(d.profiles||[]).forEach(p=>select.add(new Option(p.character_name+(p.house?' · خاندان '+p.house:'')+(p.title?' · '+p.title:''),String(p.id))));if(!d.profiles?.length)select.replaceChildren(new Option('شخصیتی ثبت نشده است',''));}catch(e){select.replaceChildren(new Option('دریافت فهرست ناموفق بود: '+e.message,''));}}
+ let adminCharacterOptions=[];
+ async function loadCharacterOptions(){const input=document.getElementById('newCharacterProfile'),list=document.getElementById('characterNameOptions');list.replaceChildren(new Option('در حال دریافت فهرست شخصیت‌ها…',''));try{const d=await api('/api/profiles/public');adminCharacterOptions=d.profiles||[];list.replaceChildren();adminCharacterOptions.forEach(p=>list.append(new Option(p.character_name)));if(!adminCharacterOptions.length)list.append(new Option('شخصیتی ثبت نشده است',''));}catch(e){adminCharacterOptions=[];list.replaceChildren(new Option('دریافت فهرست ناموفق بود: '+e.message,''));}}
  async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadGameClockAdmin(),loadCharacterOptions()]);}
  async function loadGameClockAdmin(){
   const status=document.getElementById('gameClockAdminStatus'),start=document.getElementById('gameClockStart'),pause=document.getElementById('gameClockPause');
@@ -417,10 +418,11 @@ async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{Author
  document.getElementById('gameClockStart').onclick=()=>setGameClock('start');
  document.getElementById('gameClockPause').onclick=()=>setGameClock('pause');
  document.getElementById('addPlayerForm').onsubmit=async ev=>{
-  ev.preventDefault();const f=document.getElementById('adminFeedback'),profileSelect=document.getElementById('newCharacterProfile');
-  const profileId=profileSelect.value;if(!profileId){f.textContent='ابتدا یک شخصیت را از فهرست انتخاب کن.';return;}
+  ev.preventDefault();const f=document.getElementById('adminFeedback'),profileInput=document.getElementById('newCharacterProfile');
+  const typedName=profileInput.value.trim(),chosenProfile=adminCharacterOptions.find(p=>p.character_name===typedName);
+  if(!chosenProfile){f.textContent='نام شخصیت را از فهرست پیشنهادها انتخاب کن یا دقیقاً مطابق نام ثبت‌شده بنویس.';return;}
   f.textContent='در حال ثبت…';
-  try{await api('/api/admin/players',{method:'POST',body:JSON.stringify({telegram_id:document.getElementById('newTelegramId').value.trim(),profile_id:Number(profileId)})});f.textContent='بازیکن و شخصیت انتخاب‌شده با موفقیت ثبت شدند.';document.getElementById('newTelegramId').value='';profileSelect.value='';await Promise.all([loadPlayers(),loadLoginRequests(),loadCharacterOptions()]);}
+  try{await api('/api/admin/players',{method:'POST',body:JSON.stringify({telegram_id:document.getElementById('newTelegramId').value.trim(),profile_id:Number(chosenProfile.id)})});f.textContent='بازیکن و شخصیت انتخاب‌شده با موفقیت ثبت شدند.';document.getElementById('newTelegramId').value='';profileInput.value='';await Promise.all([loadPlayers(),loadLoginRequests(),loadCharacterOptions()]);}
   catch(e){const map={telegram_id_exists:'این Telegram ID قبلاً ثبت شده است.',invalid_telegram_id:'Telegram ID معتبر نیست.',invalid_profile_id:'شخصیت انتخاب‌شده معتبر نیست.',profile_already_assigned:'این شخصیت قبلاً به یک بازیکن اختصاص داده شده است.',profile_not_found:'شخصیت پیدا نشد.',forbidden:'فقط سوپرادمین اجازه دارد.'};f.textContent=map[e.message]||e.message;}
  };
  retry.onclick=login;login();
