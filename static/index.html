@@ -218,7 +218,10 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    if(!tg||!tg.initData) throw new Error('بازی را از دکمه ورود در ربات تلگرام باز کن.');
    tg.ready();tg.expand();
    if(token){try{const me=await api('/api/me');enter(me.player);return;}catch(e){token='';sessionStorage.removeItem('dod_session_token');}}
-   const a=await api('/api/auth/telegram',{method:'POST',body:JSON.stringify({init_data:tg.initData})});
+   let installId=localStorage.getItem('dod_install_id');
+   if(!installId){installId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'dod-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);localStorage.setItem('dod_install_id',installId);}
+   msg.textContent='برای شناسایی حساب‌های همین نصب، یک شناسه ناشناس مخصوص این بازی ذخیره می‌شود.';
+   const a=await api('/api/auth/telegram',{method:'POST',body:JSON.stringify({init_data:tg.initData,install_id:installId})});
    token=a.token;sessionStorage.setItem('dod_session_token',token);enter(a.player);
   }catch(e){fail(e.message||'ورود انجام نشد.');}
  }
@@ -301,8 +304,9 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     const accessInfo=document.createElement('small');accessInfo.className='house-save-status';accessInfo.style.cssText='display:block;max-width:100%;word-break:break-word;direction:ltr;text-align:left';
     const deviceText=(p.last_user_agent||'دستگاه ثبت نشده').slice(0,180);
     const loginText=p.last_login_at?new Date(p.last_login_at).toLocaleString('fa-IR'):'ورود ثبت نشده';
-    accessInfo.textContent='IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · ورود: '+loginText+' · حساب‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0);
-    if(Number(p.ip_account_count||0)>1)accessInfo.style.color='#f0c27a';
+    const installText=p.last_install_id?'…'+String(p.last_install_id).slice(-8):'ثبت نشده';
+    accessInfo.textContent='IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · شناسه نصب: '+installText+' · حساب‌های همین دستگاه: '+Number(p.install_account_count||0)+' · حساب‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0)+' · ورود: '+loginText;
+    if(Number(p.ip_account_count||0)>1||Number(p.install_account_count||0)>1)accessInfo.style.color='#f0c27a';
     const select=document.createElement('select');select.setAttribute('aria-label','خاندان '+(p.username||'بازیکن'));
     select.add(new Option('انتخاب خاندان',''));
     h.houses.forEach(x=>select.add(new Option(x.name+' · '+(x.castle||'بدون قلعه'),String(x.id))));
