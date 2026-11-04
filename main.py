@@ -1161,6 +1161,104 @@ async def me_handler(request):
     return web.json_response({"ok": True, "player": player})
 
 
+
+async def military_requests_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        profiles = await conn.fetch("""
+            SELECT id, character_name, title, location, house, warfare, owner_player_id
+            FROM character_profiles WHERE owner_player_id IS NOT NULL ORDER BY character_name
+        """)
+        requests = await conn.fetch("""
+            SELECT m.*, s.username AS sender_name, r.username AS recipient_name
+            FROM military_campaigns m JOIN players s ON s.id=m.sender_player_id
+            LEFT JOIN players r ON r.id=m.commander_player_id
+            WHERE m.sender_player_id=$1 OR m.commander_player_id=$1
+            ORDER BY m.created_at DESC LIMIT 100
+        """, player["id"])
+    return web.json_response({"ok":True,"profiles":[dict(x) for x in profiles],
+        "requests":[dict(x) for x in requests],"player_id":player["id"],"username":player["username"]})
+
+
+async def military_campaign_create_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    try:
+        data=await request.json()
+        count=int(data.get("count",0)); kind=str(data.get("commander_type","self"))
+        mission=str(data.get("mission","attack")); target=str(data.get("target") or "").strip() or None
+        target_by_commander=bool(data.get("target_by_commander",False))
+        profile_id=int(data["profile_id"]) if data.get("profile_id") not in (None,"") else None
+    except (ValueError,TypeError):
+        return json_error("invalid_campaign")
+    if count<1 or count>100000000 or kind not in {"self","member","hero","external"}:
+        return json_error("invalid_campaign")
+    if mission not in {"attack","travel","aid","defend","scout"}:
+        return json_error("invalid_mission")
+    if target_by_commander: target=None
+    if target and len(target)>150: return json_error("invalid_target")
+    commander_id=player["id"]; commander_name=player["username"]
+    if kind!="self":
+        if not profile_id: return json_error("commander_required")
+        async with request.app["db"].acquire() as conn:
+            profile=await conn.fetchrow("SELECT id,character_name,owner_player_id,warfare FROM character_profiles WHERE id=$1",profile_id)
+        if not profile or not profile["owner_player_id"]: return json_error("commander_not_found",404)
+        if kind in {"member","hero"} and profile["owner_player_id"]!=player["id"]:
+            return json_error("commander_not_owned",403)
+        if kind=="hero" and int(profile["warfare"] or 0)<70: return json_error("commander_not_qualified")
+        commander_id=profile["owner_player_id"]; commander_name=profile["character_name"]
+    status="pending_commander" if commander_id!=player["id"] else ("awaiting_destination" if not target else "dispatched")
+    async with request.app["db"].acquire() as conn:
+        row=await conn.fetchrow("""
+            INSERT INTO military_campaigns
+            (sender_player_id,sender_house_id,commander_player_id,commander_profile_id,commander_name,
+             commander_type,target,target_by_commander,mission,troop_count,status)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            RETURNING id,status,target,mission,troop_count,commander_name
+        """,player["id"],player.get("house_id"),commander_id,profile_id,commander_name,kind,
+             target,target_by_commander,mission,count,status)
+    return web.json_response({"ok":True,"campaign":dict(row)})
+
+
+async def military_campaign_respond_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"): return json_error("unauthorized",401)
+    try:
+        campaign_id=int(request.match_info["campaign_id"]); decision=str((await request.json()).get("decision",""))
+    except (ValueError,TypeError): return json_error("invalid_response")
+    if decision not in {"accept","reject"}: return json_error("invalid_response")
+    async with request.app["db"].acquire() as conn:
+        row=await conn.fetchrow("""
+            UPDATE military_campaigns SET status=CASE WHEN $1='accept'
+              THEN CASE WHEN target_by_commander OR target IS NULL THEN 'awaiting_destination' ELSE 'dispatched' END
+              ELSE 'rejected' END,responded_at=NOW()
+            WHERE id=$2 AND commander_player_id=$3 AND status='pending_commander'
+            RETURNING id,status,target,mission,troop_count
+        """,decision,campaign_id,player["id"])
+    if not row: return json_error("request_not_found_or_already_answered",404)
+    return web.json_response({"ok":True,"campaign":dict(row)})
+
+
+async def military_campaign_destination_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"): return json_error("unauthorized",401)
+    try:
+        campaign_id=int(request.match_info["campaign_id"]); target=str((await request.json()).get("target","")).strip()
+    except (ValueError,TypeError): return json_error("invalid_target")
+    if not target or len(target)>150: return json_error("invalid_target")
+    async with request.app["db"].acquire() as conn:
+        row=await conn.fetchrow("""
+            UPDATE military_campaigns SET target=$1,status='dispatched'
+            WHERE id=$2 AND commander_player_id=$3 AND status='awaiting_destination'
+            RETURNING id,status,target,mission,troop_count
+        """,target,campaign_id,player["id"])
+    if not row: return json_error("campaign_not_waiting_for_destination",404)
+    return web.json_response({"ok":True,"campaign":dict(row)})
+
+
 async def logout_handler(request):
     token = get_bearer_token(request)
     if token:
@@ -2535,6 +2633,26 @@ async def on_startup(app):
 
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS military_campaigns (
+                id BIGSERIAL PRIMARY KEY,
+                sender_player_id BIGINT NOT NULL REFERENCES players(id),
+                sender_house_id BIGINT REFERENCES houses(id),
+                commander_player_id BIGINT NOT NULL REFERENCES players(id),
+                commander_profile_id BIGINT REFERENCES character_profiles(id),
+                commander_name VARCHAR(180) NOT NULL,
+                commander_type VARCHAR(20) NOT NULL,
+                target VARCHAR(150),
+                target_by_commander BOOLEAN NOT NULL DEFAULT FALSE,
+                mission VARCHAR(20) NOT NULL,
+                troop_count BIGINT NOT NULL CHECK (troop_count > 0),
+                status VARCHAR(30) NOT NULL DEFAULT 'pending_commander',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                responded_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS military_campaigns_parties_idx ON military_campaigns (sender_player_id, commander_player_id, status, created_at DESC)")
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS market_listings (
                 id BIGSERIAL PRIMARY KEY,
                 seller_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -2682,6 +2800,10 @@ def create_app():
     app.router.add_post("/api/admin/economy/reset", admin_reset_economy_handler)
     app.router.add_post("/api/admin/game-clock/start", admin_game_clock_start_handler)
     app.router.add_post("/api/admin/game-clock/pause", admin_game_clock_pause_handler)
+    app.router.add_get("/api/military/requests", military_requests_handler)
+    app.router.add_post("/api/military/campaigns", military_campaign_create_handler)
+    app.router.add_post("/api/military/campaigns/{campaign_id}/respond", military_campaign_respond_handler)
+    app.router.add_put("/api/military/campaigns/{campaign_id}/destination", military_campaign_destination_handler)
     app.router.add_get("/api/family", family_handler)
     app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
     app.router.add_get("/api/court/appointments", court_appointments_handler)
