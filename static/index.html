@@ -252,13 +252,40 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    }
   }
  }
+ async function beginDesktopLogin(){
+  const old=document.getElementById('desktopLoginLink');if(old)old.remove();
+  const oldStatus=document.getElementById('desktopLoginStatus');if(oldStatus)oldStatus.remove();
+  msg.textContent='در حال ساخت درخواست ورود امن…';
+  try{
+   const request=await api('/api/auth/desktop/request',{method:'POST',body:'{}'});
+   const link=document.createElement('a');link.id='desktopLoginLink';link.href=request.bot_url;link.target='_blank';link.rel='noopener noreferrer';
+   link.textContent='۱) تأیید هویت در ربات تلگرام';link.style.cssText='display:block;margin:14px auto 8px;padding:12px 14px;max-width:290px;border:1px solid #d5ae62;border-radius:10px;background:linear-gradient(#8b6734,#49321b);color:#fff0c8;text-decoration:none;font:bold 14px Tahoma';
+   const status=document.createElement('div');status.id='desktopLoginStatus';status.textContent='۲) لینک را باز کن و Start را در ربات بزن؛ این صفحه را باز نگه دار.';status.style.cssText='font:12px/2 Tahoma;color:#d6c6a7;margin-top:8px';
+   document.querySelector('.auth-card').append(link,status);
+   link.addEventListener('click',()=>{status.textContent='منتظر تأیید تلگرام هستیم…';});
+   const deadline=Date.now()+300000;
+   while(Date.now()<deadline){
+    await new Promise(resolve=>setTimeout(resolve,2000));
+    const result=await api('/api/auth/desktop/'+encodeURIComponent(request.code));
+    if(result.status==='approved'){
+     token=result.token;sessionStorage.setItem('dod_session_token',token);enter(result.player);return;
+    }
+   }
+   status.textContent='مهلت درخواست تمام شد. صفحه را تازه‌سازی و دوباره تلاش کن.';
+  }catch(e){msg.textContent='ورود با کامپیوتر انجام نشد: '+(e.message||'خطای ناشناخته');}
+ }
  async function login(){
   retry.hidden=true;msg.textContent='در حال بررسی هویت تلگرام…';
   try{
-   const tg=window.Telegram&&window.Telegram.WebApp;
-   if(!tg||!tg.initData) throw new Error('بازی را از دکمه ورود در ربات تلگرام باز کن.');
-   tg.ready();tg.expand();
    if(token){try{const me=await api('/api/me');enter(me.player);return;}catch(e){token='';sessionStorage.removeItem('dod_session_token');}}
+   const tg=window.Telegram&&window.Telegram.WebApp;
+   if(!tg||!tg.initData){
+    msg.textContent='برای ورود با کامپیوتر، هویتت را از طریق ربات تلگرام تأیید کن.';
+    const button=document.createElement('button');button.type='button';button.textContent='ورود با کامپیوتر از طریق ربات';button.style.cssText='margin-top:12px';
+    button.onclick=beginDesktopLogin;document.querySelector('.auth-card').append(button);
+    retry.hidden=false;return;
+   }
+   tg.ready();tg.expand();
    let installId=localStorage.getItem('dod_install_id');
    if(!installId){installId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'dod-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);localStorage.setItem('dod_install_id',installId);}
    msg.textContent='برای شناسایی حساب‌های همین نصب، یک شناسه ناشناس مخصوص این بازی ذخیره می‌شود.';
