@@ -1213,8 +1213,11 @@ async def military_campaign_create_handler(request):
     if kind!="self":
         if not profile_id: return json_error("commander_required")
         async with request.app["db"].acquire() as conn:
-            profile=await conn.fetchrow("SELECT cp.id,cp.character_name,cp.owner_player_id,cp.warfare,p.house_id AS owner_house_id
-             FROM character_profiles cp JOIN players p ON p.id=cp.owner_player_id WHERE cp.id=$1",profile_id)
+            profile=await conn.fetchrow("""
+                SELECT cp.id,cp.character_name,cp.owner_player_id,cp.warfare,p.house_id AS owner_house_id
+                FROM character_profiles cp JOIN players p ON p.id=cp.owner_player_id
+                WHERE cp.id=$1
+            """,profile_id)
         if not profile or not profile["owner_player_id"]: return json_error("commander_not_found",404)
         if kind in {"member","hero"} and profile["owner_house_id"]!=player.get("house_id"):
             return json_error("commander_not_in_house",403)
