@@ -45,7 +45,7 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
   <hr><h3>مدیریت بازیکن‌ها</h3><p>افزودن بازیکن جدید به بازی</p>
   <form id="addPlayerForm">
    <label>Telegram ID عددی</label><input id="newTelegramId" inputmode="numeric" pattern="[0-9]+" required>
-   <label for="newCharacterProfile">انتخاب شخصیت از فهرست</label><select id="newCharacterProfile" required style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></select><small style="display:block;color:#c9bda7;margin-top:5px">شخصیت موردنظر را از فهرست انتخاب کن.</small>
+   <label for="newCharacterProfile">انتخاب کرکتر از فهرست کامل شخصیت‌ها</label><select id="newCharacterProfile" required style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></select><small style="display:block;color:#c9bda7;margin-top:5px">شخصیت موردنظر را از فهرست انتخاب کن.</small>
    <button type="submit">افزودن بازیکن</button><div id="adminFeedback" role="status"></div>
   </form><hr><h3>بازیکن‌های ثبت‌شده</h3><div id="playersList">در حال دریافت…</div>
  <hr><h3>ورودهای در انتظار بررسی</h3>
@@ -299,7 +299,8 @@ async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{Author
  async function loadPlayers(){
   const list=document.getElementById('playersList');list.textContent='در حال دریافت…';
   try{
-   const [first,h]=await Promise.all([api('/api/admin/players?limit=50&page=1'),api('/api/admin/houses')]);
+   const [first,h,profileData]=await Promise.all([api('/api/admin/players?limit=50&page=1'),api('/api/admin/houses'),api('/api/profiles')]);
+   const allCharacters=Array.isArray(profileData.profiles)?profileData.profiles:[];
    const d={players:[...first.players]};
    for(let page=2;page<=first.pages;page++){
     const next=await api('/api/admin/players?limit=50&page='+page);
@@ -374,7 +375,31 @@ async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{Author
      catch(e){activeStatus.textContent='خطا: '+e.message;}
      finally{activeBtn.disabled=!!p.is_super_admin;}
     };
-    row.append(n,i,accessInfo,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
+    const characterLabel=document.createElement('small');characterLabel.className='house-save-status';characterLabel.textContent='کرکترهای این بازیکن: '+(allCharacters.filter(c=>Number(c.owner_player_id)===Number(p.id)).map(c=>c.character_name).join('، ')||'هنوز کرکتری اختصاص داده نشده');
+    const characterSelect=document.createElement('select');characterSelect.setAttribute('aria-label','انتخاب کرکتر برای '+(p.username||'بازیکن'));
+    characterSelect.add(new Option('انتخاب از تمام کرکترها',''));
+    allCharacters.forEach(c=>characterSelect.add(new Option(c.character_name+(c.house?' · '+c.house:'')+(c.owner_player_id&&Number(c.owner_player_id)!==Number(p.id)?' · متعلق به بازیکن دیگر':''),String(c.id))));
+    const addCharacter=document.createElement('button');addCharacter.type='button';addCharacter.textContent='افزودن کرکتر به این بازیکن';
+    const characterStatus=document.createElement('small');characterStatus.className='house-save-status';
+    addCharacter.onclick=async()=>{
+     const profileId=Number(characterSelect.value);const chosen=allCharacters.find(c=>Number(c.id)===profileId);
+     if(!chosen){characterStatus.textContent='اول یک کرکتر از فهرست انتخاب کن.';return;}
+     if(Number(chosen.owner_player_id)===Number(p.id)){characterStatus.textContent='این کرکتر از قبل برای همین بازیکن ثبت شده.';return;}
+     if(chosen.owner_player_id){
+      const previous=profileData.players?.find(x=>Number(x.id)===Number(chosen.owner_player_id));
+      if(!confirm('این کرکتر اکنون متعلق به '+(previous?.username||'بازیکن دیگر')+' است. به '+(p.username||'این بازیکن')+' منتقل شود؟'))return;
+     }
+     addCharacter.disabled=true;characterStatus.textContent='در حال افزودن کرکتر…';
+     try{
+      await api('/api/admin/profiles/'+profileId+'/owner',{method:'PUT',body:JSON.stringify({owner_player_id:Number(p.id)})});
+      chosen.owner_player_id=Number(p.id);
+      characterLabel.textContent='کرکترهای این بازیکن: '+allCharacters.filter(c=>Number(c.owner_player_id)===Number(p.id)).map(c=>c.character_name).join('، ');
+      characterStatus.textContent='کرکتر با موفقیت به این بازیکن اضافه شد.';
+      characterSelect.value='';
+     }catch(e){characterStatus.textContent='افزودن کرکتر ناموفق بود: '+e.message;}
+     finally{addCharacter.disabled=false;}
+    };
+    row.append(n,i,accessInfo,characterLabel,characterSelect,addCharacter,characterStatus,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
