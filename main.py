@@ -2124,6 +2124,7 @@ async def my_house_state_handler(request):
             if not row:
                 return json_error("house_not_found", 404)
             state = _json_object(row["game_state"])
+            updated_at = row["game_state_updated_at"]
             clock = await read_game_clock(conn)
             if clock and clock.get("is_running"):
                 year = int(clock["game_year"])
@@ -2134,7 +2135,8 @@ async def my_house_state_handler(request):
                     state["_lastIncomeYear"] = year
                     await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
                         json.dumps(state, ensure_ascii=False), player["house_id"])
-    return web.json_response({"ok": True, "state": state, "updated_at": row["game_state_updated_at"].isoformat() if row["game_state_updated_at"] else None, "game_year": clock["game_year"] if clock else None})
+                    updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
+    return web.json_response({"ok": True, "state": state, "updated_at": updated_at.isoformat() if updated_at else None, "game_year": clock["game_year"] if clock else None})
 
 
 async def my_house_state_update_handler(request):
@@ -2166,9 +2168,10 @@ async def my_house_state_update_handler(request):
             if not row: return json_error("house_not_found", 404)
             current = _json_object(row["game_state"])
             current.update(incoming)
-            await conn.execute("UPDATE houses SET game_state=$1::jsonb WHERE id=$2",
+            await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
                 json.dumps(current, ensure_ascii=False), player["house_id"])
-    return web.json_response({"ok": True})
+            updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
+    return web.json_response({"ok": True, "updated_at": updated_at.isoformat() if updated_at else None})
 
 
 async def game_clock_handler(request):
@@ -2256,6 +2259,7 @@ async def admin_reset_game_state_handler(request):
                 next_version,
             )
             await conn.execute("UPDATE houses SET treasury = 0, food = 0")
+            await conn.execute("UPDATE houses SET game_state='{}'::jsonb, game_state_updated_at=NULL")
             await conn.execute("""
                 UPDATE game_clock
                 SET game_year = 129, season = 'spring', is_running = FALSE,
@@ -2289,6 +2293,7 @@ async def admin_reset_economy_handler(request):
                 "UPDATE game_state_control SET economy_reset_version = $1, updated_at = NOW() WHERE id = 1",
                 next_version,
             )
+            await conn.execute("UPDATE houses SET game_state='{}'::jsonb, game_state_updated_at=NULL")
     return web.json_response({
         "ok": True,
         "economy_reset_version": next_version,
