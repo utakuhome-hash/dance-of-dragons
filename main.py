@@ -265,7 +265,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v3?build=20261104a")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104b")
         )]
     ])
     return keyboard
@@ -2253,7 +2253,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v3?build=20261104a"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104b"),
             )
         )
     except Exception:
@@ -2294,6 +2294,7 @@ def create_app():
     app.router.add_get("/app", index_handler)
     app.router.add_get("/app-v2", index_handler)
     app.router.add_get("/app-v3", index_handler)
+    app.router.add_get("/play-v4", index_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
