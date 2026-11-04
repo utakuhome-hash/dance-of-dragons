@@ -265,7 +265,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104b")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104d")
         )]
     ])
     return keyboard
@@ -421,13 +421,16 @@ async def auth_handler(request):
 
         token = secrets.token_urlsafe(48)
         token_hash = hash_session_token(token)
+        forwarded_ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        ip_address = (forwarded_ip or request.remote or "")[:64] or None
+        user_agent = request.headers.get("User-Agent", "")[:1000] or None
         await conn.execute(
             """
             INSERT INTO player_sessions
-                (player_id, session_token_hash, created_at, expires_at, revoked_at)
-            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL)
+                (player_id, session_token_hash, created_at, expires_at, revoked_at, ip_address, user_agent)
+            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL, $3, $4)
             """,
-            player["id"], token_hash
+            player["id"], token_hash, ip_address, user_agent
         )
 
     return web.json_response({
@@ -1180,9 +1183,22 @@ async def admin_players_handler(request):
             rows = await conn.fetch(
                 """
                 SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
-                       h.name AS house_name, p.is_active, p.is_super_admin
+                       h.name AS house_name, p.is_active, p.is_super_admin,
+                       ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
+                       ls.created_at AS last_login_at,
+                       COALESCE((SELECT COUNT(DISTINCT s2.player_id)
+                                 FROM player_sessions s2
+                                 WHERE s2.ip_address = ls.ip_address
+                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
+                LEFT JOIN LATERAL (
+                    SELECT ip_address, user_agent, created_at
+                    FROM player_sessions s
+                    WHERE s.player_id = p.id
+                    ORDER BY s.created_at DESC
+                    LIMIT 1
+                ) ls ON TRUE
                 WHERE p.username ILIKE $1
                    OR p.telegram_id::text ILIKE $1
                    OR p.id::text ILIKE $1
@@ -1196,9 +1212,22 @@ async def admin_players_handler(request):
             rows = await conn.fetch(
                 """
                 SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
-                       h.name AS house_name, p.is_active, p.is_super_admin
+                       h.name AS house_name, p.is_active, p.is_super_admin,
+                       ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
+                       ls.created_at AS last_login_at,
+                       COALESCE((SELECT COUNT(DISTINCT s2.player_id)
+                                 FROM player_sessions s2
+                                 WHERE s2.ip_address = ls.ip_address
+                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
+                LEFT JOIN LATERAL (
+                    SELECT ip_address, user_agent, created_at
+                    FROM player_sessions s
+                    WHERE s.player_id = p.id
+                    ORDER BY s.created_at DESC
+                    LIMIT 1
+                ) ls ON TRUE
                 ORDER BY p.id DESC
                 LIMIT $1 OFFSET $2
                 """,
@@ -2134,7 +2163,10 @@ async def on_startup(app):
                 revoked_at TIMESTAMPTZ
             )
         """)
+        await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64)")
+        await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_ip_created_idx ON player_sessions (ip_address, created_at DESC)")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_login_requests (
@@ -2458,7 +2490,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104c"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104d"),
             )
         )
     except Exception:
