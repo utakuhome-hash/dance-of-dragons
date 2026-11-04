@@ -2304,7 +2304,6 @@ def create_app():
     app.router.add_get("/app-v2", index_handler)
     app.router.add_get("/app-v3", index_handler)
     app.router.add_get("/play-v4", index_handler)
-    app.router.add_get("/{tail:.*}", webapp_fallback_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
@@ -2347,6 +2346,7 @@ def create_app():
     app.router.add_get("/api/mail/unread-count", mail_unread_count_handler)
     app.router.add_post("/api/mail", mail_send_handler)
     app.router.add_post("/api/mail/{letter_id}/read", mail_read_handler)
+    app.router.add_get("/{tail:.*}", webapp_fallback_handler)
 
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
