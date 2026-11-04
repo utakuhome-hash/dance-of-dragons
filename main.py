@@ -424,13 +424,14 @@ async def auth_handler(request):
         forwarded_ip = request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         ip_address = (forwarded_ip or request.remote or "")[:64] or None
         user_agent = request.headers.get("User-Agent", "")[:1000] or None
+        install_id = str(data.get("install_id", "")).strip()[:80] or None
         await conn.execute(
             """
             INSERT INTO player_sessions
-                (player_id, session_token_hash, created_at, expires_at, revoked_at, ip_address, user_agent)
-            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL, $3, $4)
+                (player_id, session_token_hash, created_at, expires_at, revoked_at, ip_address, user_agent, install_id)
+            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL, $3, $4, $5)
             """,
-            player["id"], token_hash, ip_address, user_agent
+            player["id"], token_hash, ip_address, user_agent, install_id
         )
 
     return web.json_response({
@@ -1185,15 +1186,21 @@ async def admin_players_handler(request):
                 SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
                        h.name AS house_name, p.is_active, p.is_super_admin,
                        ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
+                       ls.install_id AS last_install_id,
                        ls.created_at AS last_login_at,
                        COALESCE((SELECT COUNT(DISTINCT s2.player_id)
                                  FROM player_sessions s2
                                  WHERE s2.ip_address = ls.ip_address
-                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count
+                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count,
+                       COALESCE((SELECT COUNT(DISTINCT s3.player_id)
+                                 FROM player_sessions s3
+                                 WHERE s3.install_id = ls.install_id
+                                   AND s3.install_id IS NOT NULL
+                                   AND s3.created_at > NOW() - INTERVAL '30 days'), 0) AS install_account_count
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
-                    SELECT ip_address, user_agent, created_at
+                    SELECT ip_address, user_agent, install_id, created_at
                     FROM player_sessions s
                     WHERE s.player_id = p.id
                     ORDER BY s.created_at DESC
@@ -1214,15 +1221,21 @@ async def admin_players_handler(request):
                 SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
                        h.name AS house_name, p.is_active, p.is_super_admin,
                        ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
+                       ls.install_id AS last_install_id,
                        ls.created_at AS last_login_at,
                        COALESCE((SELECT COUNT(DISTINCT s2.player_id)
                                  FROM player_sessions s2
                                  WHERE s2.ip_address = ls.ip_address
-                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count
+                                   AND s2.created_at > NOW() - INTERVAL '30 days'), 0) AS ip_account_count,
+                       COALESCE((SELECT COUNT(DISTINCT s3.player_id)
+                                 FROM player_sessions s3
+                                 WHERE s3.install_id = ls.install_id
+                                   AND s3.install_id IS NOT NULL
+                                   AND s3.created_at > NOW() - INTERVAL '30 days'), 0) AS install_account_count
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
-                    SELECT ip_address, user_agent, created_at
+                    SELECT ip_address, user_agent, install_id, created_at
                     FROM player_sessions s
                     WHERE s.player_id = p.id
                     ORDER BY s.created_at DESC
@@ -2171,6 +2184,8 @@ async def on_startup(app):
         """)
         await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64)")
         await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT")
+        await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS install_id VARCHAR(80)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_install_created_idx ON player_sessions (install_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_ip_created_idx ON player_sessions (ip_address, created_at DESC)")
 
