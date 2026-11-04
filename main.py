@@ -1178,8 +1178,15 @@ async def military_requests_handler(request):
             WHERE m.sender_player_id=$1 OR m.commander_player_id=$1
             ORDER BY m.created_at DESC LIMIT 100
         """, player["id"])
+    request_items = []
+    for item in requests:
+        value = dict(item)
+        for field in ("created_at", "responded_at"):
+            if value.get(field):
+                value[field] = value[field].isoformat()
+        request_items.append(value)
     return web.json_response({"ok":True,"profiles":[dict(x) for x in profiles],
-        "requests":[dict(x) for x in requests],"player_id":player["id"],"username":player["username"]})
+        "requests":request_items,"player_id":player["id"],"username":player["username"]})
 
 
 async def military_campaign_create_handler(request):
