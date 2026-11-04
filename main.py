@@ -1373,21 +1373,32 @@ async def admin_add_player_handler(request):
         return json_error("invalid_json")
 
     raw_id = str(data.get("telegram_id", "")).strip()
-    username = str(data.get("username", "")).strip()
+    try:
+        profile_id = int(data.get("profile_id", 0))
+    except (TypeError, ValueError):
+        return json_error("invalid_profile_id")
 
     if not raw_id.isdigit():
         return json_error("invalid_telegram_id")
     telegram_id = int(raw_id)
     if telegram_id <= 0 or telegram_id > 9223372036854775807:
         return json_error("invalid_telegram_id")
-    if not username or len(username) > 60:
-        return json_error("invalid_username")
+    if profile_id <= 0:
+        return json_error("invalid_profile_id")
 
     try:
         async with request.app["db"].acquire() as conn:
             async with conn.transaction():
-                # Serializes additions through this endpoint.
+                # Serialize registrations and lock the selected character to prevent double assignment.
                 await conn.execute("SELECT pg_advisory_xact_lock(739201847)")
+                profile = await conn.fetchrow(
+                    "SELECT id, character_name, owner_player_id FROM character_profiles WHERE id = $1 FOR UPDATE",
+                    profile_id,
+                )
+                if not profile:
+                    return json_error("profile_not_found", 404)
+                if profile["owner_player_id"] is not None:
+                    return json_error("profile_already_assigned", 409)
                 existing = await conn.fetchval(
                     "SELECT EXISTS(SELECT 1 FROM players WHERE telegram_id = $1)",
                     telegram_id,
@@ -1404,9 +1415,13 @@ async def admin_add_player_handler(request):
                     RETURNING id, username, telegram_id, role, house_id,
                               is_active, is_super_admin
                     """,
-                    username, telegram_id,
+                    profile["character_name"], telegram_id,
                 )
-        return web.json_response({"ok": True, "player": dict(player)}, status=201)
+                await conn.execute(
+                    "UPDATE character_profiles SET owner_player_id = $1, updated_at = NOW() WHERE id = $2",
+                    player["id"], profile_id,
+                )
+        return web.json_response({"ok": True, "player": dict(player), "profile_id": profile_id}, status=201)
     except asyncpg.UniqueViolationError:
         return json_error("telegram_id_exists", 409)
 
