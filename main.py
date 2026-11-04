@@ -13,7 +13,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import CommandStart
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, MenuButtonWebApp
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 
@@ -266,7 +266,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v2")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v3?build=20261104a")
         )]
     ])
     return keyboard
@@ -2251,6 +2251,16 @@ async def on_startup(app):
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS character_travels_current_idx ON character_travels (current_castle, updated_at DESC)")
     try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="ورود به بازی",
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/app-v3?build=20261104a"),
+            )
+        )
+    except Exception:
+        logging.exception("Could not update Telegram app menu button")
+
+    try:
         await bot.set_webhook(WEBHOOK_URL)
     except TelegramRetryAfter as exc:
         logging.warning(
@@ -2284,6 +2294,7 @@ def create_app():
     app.router.add_get("/", index_handler)
     app.router.add_get("/app", index_handler)
     app.router.add_get("/app-v2", index_handler)
+    app.router.add_get("/app-v3", index_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_get("/api/me", me_handler)
