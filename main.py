@@ -26,6 +26,12 @@ WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
 BASE_DIR = Path(__file__).resolve().parent
 WEBAPP_FILE = BASE_DIR / "static" / "index.html"
 
+TRADE_GOODS = {
+    "چوب", "سنگ", "آهن", "غذا", "اسب جنگی", "خز", "پشم", "شراب",
+    "ادویه", "آهن سیاه", "نمک", "شمشیر", "نیزه", "کمان", "تبر", "گرز",
+    "خنجر", "کمان پولادی", "سپر کوتاه", "سپر بلند",
+}
+
 HOUSE_SEEDS = [
     [
         "استارک",
@@ -1372,7 +1378,7 @@ async def market_create_listing_handler(request):
         note = str(data.get("note", "")).strip()
     except (ValueError, TypeError, Exception):
         return json_error("invalid_listing")
-    if not item_name or len(item_name) > 100:
+    if item_name not in TRADE_GOODS:
         return json_error("invalid_item_name")
     if quantity < 1 or quantity > 1000000000 or unit_price < 1 or unit_price > 1000000000:
         return json_error("invalid_quantity_or_price")
@@ -1468,7 +1474,7 @@ async def trade_contract_create_handler(request):
         return json_error("invalid_contract")
     if recipient_house_id <= 0 or recipient_house_id == int(player["house_id"]):
         return json_error("invalid_recipient_house")
-    if not offered_item or len(offered_item) > 100 or not requested_item or len(requested_item) > 100:
+    if offered_item not in TRADE_GOODS or requested_item not in TRADE_GOODS:
         return json_error("invalid_contract_item")
     if not (1 <= offered_quantity <= 1000000000 and 1 <= requested_quantity <= 1000000000):
         return json_error("invalid_contract_quantity")
