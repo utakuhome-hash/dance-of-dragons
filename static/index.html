@@ -190,7 +190,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   catch(e){btn.title='فرمان اجرا نشد: '+e.message;}
   finally{btn.disabled=false;}
  }
- async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadGameClockAdmin()]);}
+ async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadGameClockAdmin()]);}
  async function loadGameClockAdmin(){
   const status=document.getElementById('gameClockAdminStatus'),start=document.getElementById('gameClockStart'),pause=document.getElementById('gameClockPause');
   try{const d=await api('/api/game-clock');status.textContent=(d.is_running?'ساعت فعال است':'ساعت متوقف است')+' · '+d.season_label+' · سال '+Number(d.game_year).toLocaleString('fa-IR')+' AC';start.disabled=!!d.is_running;pause.disabled=!d.is_running;}
@@ -346,7 +346,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
  document.getElementById('addPlayerForm').onsubmit=async ev=>{
   ev.preventDefault();const f=document.getElementById('adminFeedback');
   f.textContent='در حال ثبت…';
-  try{await api('/api/admin/players',{method:'POST',body:JSON.stringify({telegram_id:document.getElementById('newTelegramId').value.trim(),username:document.getElementById('newCharacterName').value.trim()})});f.textContent='بازیکن اضافه شد.';ev.target.reset();await loadPlayers();}
+  try{await api('/api/admin/players',{method:'POST',body:JSON.stringify({telegram_id:document.getElementById('newTelegramId').value.trim(),username:document.getElementById('newCharacterName').value.trim()})});f.textContent='بازیکن اضافه شد.';ev.target.reset();await Promise.all([loadPlayers(),loadLoginRequests()]);}
   catch(e){const map={telegram_id_exists:'این Telegram ID قبلاً ثبت شده است.',invalid_telegram_id:'Telegram ID معتبر نیست.',invalid_username:'نام شخصیت معتبر نیست.',forbidden:'فقط سوپرادمین اجازه دارد.'};f.textContent=map[e.message]||e.message;}
  };
  retry.onclick=login;login();
