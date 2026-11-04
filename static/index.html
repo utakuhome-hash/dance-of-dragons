@@ -161,22 +161,24 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   return changed;
  }
  async function syncSharedGameState(player){
-  try{
-   const [control,clock]=await Promise.all([api('/api/game-state-control'),api('/api/game-clock')]);
-   const scope=player&&player.house_id?'house_'+player.house_id:(player&&player.id?'player_'+player.id:'guest');
-   const versionKey='dod_reset_version_'+scope;
-   const scopedKey=scope==='guest'?'dod_demo_state_v1':'dod_demo_state_v1_scope_'+scope;
+  const scope=player&&player.house_id?'house_'+player.house_id:(player&&player.id?'player_'+player.id:'guest');
+  const versionKey='dod_reset_version_'+scope;
+  const scopedKey=scope==='guest'?'dod_demo_state_v1':'dod_demo_state_v1_scope_'+scope;
+  const [controlResult,clockResult]=await Promise.allSettled([
+   api('/api/game-state-control'),api('/api/game-clock')
+  ]);
+  let didReset=false,didEconomyReset=false,resetVersion=null;
+  if(controlResult.status==='fulfilled'){
+   const control=controlResult.value;
    const storedVersion=localStorage.getItem(versionKey);
    const knownVersion=storedVersion===null?'0':storedVersion;
    const economyVersionKey='dod_economy_reset_version_'+scope;
    const storedEconomyVersion=localStorage.getItem(economyVersionKey);
-   let didEconomyReset=false;
    if(storedEconomyVersion!==String(control.economy_reset_version||0)){
     applyEconomyDefaults(scopedKey);
     localStorage.setItem(economyVersionKey,String(control.economy_reset_version||0));
     didEconomyReset=true;
    }
-   let didReset=false;
    if(knownVersion!==String(control.reset_version)){
     localStorage.removeItem(scopedKey);
     localStorage.removeItem('dod_demo_state_v1');
@@ -185,13 +187,29 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    }else if(storedVersion===null){
     localStorage.setItem(versionKey,knownVersion);
    }
-   localStorage.setItem('dod_game_running',clock.is_running?'true':'false');
-   const frame=document.getElementById('view');
-   if(frame&&frame.contentWindow){
-    frame.contentWindow.postMessage({type:'dod-game-state',is_running:!!clock.is_running,reset_version:control.reset_version},'*');
-    if(didReset||didEconomyReset){frame.contentWindow.dispatchEvent(new Event('dod-state-change'));if(frame.contentWindow.DOD?.refreshDashboard)frame.contentWindow.DOD.refreshDashboard();}
+   resetVersion=control.reset_version;
+  }else{
+   console.warn('Game reset-control sync unavailable; preserving player state.',controlResult.reason);
+  }
+  let isRunning=null;
+  if(clockResult.status==='fulfilled'){
+   isRunning=!!clockResult.value.is_running;
+   localStorage.setItem('dod_game_running',isRunning?'true':'false');
+  }else{
+   // Keep the last known server state; a temporary API failure is not a game pause.
+   console.warn('Game clock sync unavailable; preserving last known running state.',clockResult.reason);
+  }
+  const frame=document.getElementById('view');
+  if(frame&&frame.contentWindow){
+   const message={type:'dod-game-state'};
+   if(isRunning!==null)message.is_running=isRunning;
+   if(resetVersion!==null)message.reset_version=resetVersion;
+   frame.contentWindow.postMessage(message,'*');
+   if(didReset||didEconomyReset){
+    frame.contentWindow.dispatchEvent(new Event('dod-state-change'));
+    if(frame.contentWindow.DOD?.refreshDashboard)frame.contentWindow.DOD.refreshDashboard();
    }
-  }catch(e){localStorage.setItem('dod_game_running','false');}
+  }
  }
  async function login(){
   retry.hidden=true;msg.textContent='در حال بررسی هویت تلگرام…';
@@ -280,6 +298,11 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     const row=document.createElement('div');row.className='player-row';
     const n=document.createElement('span');n.textContent=p.username||'بدون نام';
     const i=document.createElement('small');i.textContent=String(p.telegram_id||'');
+    const accessInfo=document.createElement('small');accessInfo.className='house-save-status';accessInfo.style.cssText='display:block;max-width:100%;word-break:break-word;direction:ltr;text-align:left';
+    const deviceText=(p.last_user_agent||'دستگاه ثبت نشده').slice(0,180);
+    const loginText=p.last_login_at?new Date(p.last_login_at).toLocaleString('fa-IR'):'ورود ثبت نشده';
+    accessInfo.textContent='IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · ورود: '+loginText+' · حساب‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0);
+    if(Number(p.ip_account_count||0)>1)accessInfo.style.color='#f0c27a';
     const select=document.createElement('select');select.setAttribute('aria-label','خاندان '+(p.username||'بازیکن'));
     select.add(new Option('انتخاب خاندان',''));
     h.houses.forEach(x=>select.add(new Option(x.name+' · '+(x.castle||'بدون قلعه'),String(x.id))));
@@ -337,7 +360,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
      catch(e){activeStatus.textContent='خطا: '+e.message;}
      finally{activeBtn.disabled=!!p.is_super_admin;}
     };
-    row.append(n,i,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
+    row.append(n,i,accessInfo,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
