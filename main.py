@@ -2277,6 +2277,24 @@ async def on_startup(app):
                 END,
                 updated_at = NOW()
         """)
+        # Normalize legacy English spellings to the canonical names used by the
+        # selectable character roster. Run before roster seeding so ownership and
+        # profile details stay attached to the canonical profile.
+        for legacy_name, canonical_name in (
+            ("Adam Velaryon", "Addam Velaryon"),
+            ("Alf White", "Ulf White"),
+            ("Lord Reynald Darklyn", "Ynald Darklyn"),
+        ):
+            await conn.execute("""
+                UPDATE character_profiles AS legacy
+                SET character_name = $2, updated_at = NOW()
+                WHERE legacy.character_name = $1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM character_profiles AS canonical
+                      WHERE canonical.character_name = $2
+                  )
+            """, legacy_name, canonical_name)
+
         # Ensure every character in the bot's registered travel rosters has a
         # ready-to-claim profile, even when no player owns the character yet.
         # Unknown lore fields are explicit placeholders, never guessed facts.
@@ -2440,7 +2458,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104b"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v4?build=20261104c"),
             )
         )
     except Exception:
