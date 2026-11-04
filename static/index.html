@@ -46,6 +46,10 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
    <label>نام شخصیت</label><input id="newCharacterName" maxlength="60" required>
    <button type="submit">افزودن بازیکن</button><div id="adminFeedback" role="status"></div>
   </form><hr><h3>بازیکن‌های ثبت‌شده</h3><div id="playersList">در حال دریافت…</div>
+ <hr><h3>ورودهای در انتظار بررسی</h3>
+ <p style="font-size:12px;color:#c9bda7;line-height:1.8">اگر بازیکن ثبت‌شده با شناسهٔ اشتباه وارد شود، درخواستش اینجا می‌آید. فقط با انتخاب شخصیت درست، شناسه به آن حساب متصل می‌شود؛ افراد تأییدنشده خودکار وارد نمی‌شوند.</p>
+ <button type="button" id="refreshLoginRequests">به‌روزرسانی درخواست‌ها</button>
+ <div id="loginRequestsList">در حال دریافت…</div>
  </div>
 </div>
 <style>
@@ -294,6 +298,48 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
   }catch(e){list.textContent='دریافت فهرست انجام نشد: '+e.message;}
  }
+
+ async function loadLoginRequests(){
+  const list=document.getElementById('loginRequestsList');if(!list)return;
+  list.textContent='در حال دریافت درخواست‌ها…';
+  try{
+   const [pending,first]=await Promise.all([
+    api('/api/admin/login-requests'),
+    api('/api/admin/players?limit=50&page=1')
+   ]);
+   const players=[...first.players];
+   for(let page=2;page<=first.pages;page++){
+    const next=await api('/api/admin/players?limit=50&page='+page);
+    players.push(...next.players);
+   }
+   list.replaceChildren();
+   if(!pending.requests.length){list.textContent='درخواست بررسی‌نشده‌ای وجود ندارد.';return;}
+   pending.requests.forEach(r=>{
+    const row=document.createElement('div');row.className='player-row';
+    const label=document.createElement('span');
+    const display=[r.first_name,r.last_name].filter(Boolean).join(' ')||'کاربر تلگرام';
+    label.textContent=display+(r.telegram_username?' · @'+r.telegram_username:'')+' · ID: '+r.telegram_id+' · تلاش: '+r.attempt_count;
+    const select=document.createElement('select');select.setAttribute('aria-label','اتصال درخواست به شخصیت');
+    select.add(new Option('انتخاب شخصیت ثبت‌شده',''));
+    players.forEach(p=>select.add(new Option(p.username+' · '+(p.telegram_id||'بدون ID'),String(p.id))));
+    const assign=document.createElement('button');assign.type='button';assign.textContent='اتصال شناسه';
+    const status=document.createElement('small');status.className='house-save-status';
+    assign.onclick=async()=>{
+     if(!select.value){status.textContent='اول شخصیت را انتخاب کن.';return;}
+     const chosen=players.find(p=>String(p.id)===select.value);
+     if(!confirm('شناسهٔ تلگرام '+r.telegram_id+' به شخصیت «'+(chosen?.username||'')+'» متصل شود؟'))return;
+     assign.disabled=true;status.textContent='در حال اتصال…';
+     try{
+      await api('/api/admin/login-requests/'+r.telegram_id+'/assign',{method:'POST',body:JSON.stringify({player_id:Number(select.value)})});
+      row.remove();
+      if(!list.children.length)list.textContent='درخواست بررسی‌نشده‌ای وجود ندارد.';
+     }catch(e){status.textContent=e.message==='telegram_id_exists'?'این شناسه به حساب دیگری متصل است.':'خطا: '+e.message;assign.disabled=false;}
+    };
+    row.append(label,select,assign,status);list.append(row);
+   });
+  }catch(e){list.textContent='دریافت درخواست‌ها ناموفق بود: '+e.message;}
+ }
+ document.getElementById('refreshLoginRequests').onclick=loadLoginRequests;
  document.getElementById('adminClose').onclick=()=>document.getElementById('adminPanel').hidden=true;
  document.getElementById('gameClockStart').onclick=()=>setGameClock('start');
  document.getElementById('gameClockPause').onclick=()=>setGameClock('pause');
