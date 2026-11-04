@@ -1235,9 +1235,15 @@ async def admin_players_handler(request):
             )
 
     pages = max(1, (total + per_page - 1) // per_page)
+    players = []
+    for row in rows:
+        item = dict(row)
+        if item.get("last_login_at") is not None:
+            item["last_login_at"] = item["last_login_at"].isoformat()
+        players.append(item)
     return web.json_response({
         "ok": True,
-        "players": [dict(row) for row in rows],
+        "players": players,
         "total": total,
         "page": page,
         "pages": pages,
