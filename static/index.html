@@ -147,15 +147,18 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   if(!window._dodSharedStateSync)window._dodSharedStateSync=setInterval(()=>{if(window.dodCurrentPlayer)syncSharedGameState(window.dodCurrentPlayer);},15000);
  }
  function applyEconomyDefaults(scopedKey){
-  const raw=localStorage.getItem(scopedKey);if(!raw)return false;
-  try{
-   const state=JSON.parse(raw);
-   state.resources={wood:1240,stone:680,iron:45,coins:910,food:120,subjects:38,warhorses:0,specialGoods:{fur:0,wool:0,wine:0,warhorses:0,spice:0,blackIron:0,salt:0}};
-   state.buildings={'مزرعه':1,'چوب‌بری':1,'معدن سنگ':1,'شهر':1};
-   state.queue=[];
-   localStorage.setItem(scopedKey,JSON.stringify(state));
-   return true;
-  }catch(e){console.warn('Could not reset local economy state',e);return false;}
+  const keys=[scopedKey,'dod_demo_state_v1'];let changed=false;
+  for(const key of [...new Set(keys)]){
+   const raw=localStorage.getItem(key);if(!raw)continue;
+   try{
+    const state=JSON.parse(raw);
+    state.resources={wood:1240,stone:680,iron:45,coins:910,food:120,subjects:38,warhorses:0,specialGoods:{fur:0,wool:0,wine:0,warhorses:0,spice:0,blackIron:0,salt:0}};
+    state.buildings={'مزرعه':1,'چوب‌بری':1,'معدن سنگ':1,'شهر':1};
+    state.queue=[];
+    localStorage.setItem(key,JSON.stringify(state));changed=true;
+   }catch(e){console.warn('Could not reset local economy state',e);}
+  }
+  return changed;
  }
  async function syncSharedGameState(player){
   try{
