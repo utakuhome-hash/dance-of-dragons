@@ -273,6 +273,45 @@ def main_menu():
 
 @dp.message(CommandStart())
 async def start_handler(message: Message):
+    parts = (message.text or "").split(maxsplit=1)
+    payload = parts[1].strip() if len(parts) > 1 else ""
+    if payload.startswith("desktoplogin_"):
+        code = payload[len("desktoplogin_"):]
+        if not code or len(code) > 80 or not db_pool:
+            await message.answer("درخواست ورود معتبر نیست یا منقضی شده است. دوباره از صفحه بازی درخواست ورود بده.")
+            return
+        async with db_pool.acquire() as conn:
+            request_row = await conn.fetchrow(
+                "SELECT code FROM desktop_login_requests WHERE code=$1 AND expires_at > NOW() AND session_token IS NULL FOR UPDATE",
+                code,
+            )
+            if not request_row:
+                await message.answer("این درخواست ورود منقضی شده یا قبلاً استفاده شده است. صفحه بازی را تازه‌سازی و دوباره درخواست بده.")
+                return
+            player = await conn.fetchrow(
+                """SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
+                          h.name AS house_name, p.is_active, p.is_super_admin
+                   FROM players p LEFT JOIN houses h ON h.id=p.house_id
+                   WHERE p.telegram_id=$1""",
+                message.from_user.id,
+            )
+            if not player or not player["is_active"]:
+                await message.answer("برای این حساب تلگرام بازیکن فعال ثبت نشده است. با مدیر بازی تماس بگیر.")
+                return
+            token = secrets.token_urlsafe(48)
+            await conn.execute(
+                """INSERT INTO player_sessions
+                   (player_id, session_token_hash, created_at, expires_at, revoked_at)
+                   VALUES ($1,$2,NOW(),NOW()+INTERVAL '7 days',NULL)""",
+                player["id"], hash_session_token(token),
+            )
+            await conn.execute(
+                """UPDATE desktop_login_requests SET telegram_id=$1, player_id=$2,
+                   session_token=$3, approved_at=NOW() WHERE code=$4""",
+                message.from_user.id, player["id"], token, code,
+            )
+        await message.answer("ورود شما تأیید شد. به صفحه بازی در کامپیوتر برگردید؛ ورود به‌صورت خودکار تکمیل می‌شود.")
+        return
     await message.answer(
         "به بازی Dance of Dragons خوش آمدی. برای ورود به بازی روی دکمه زیر بزن.",
         reply_markup=main_menu()
@@ -367,6 +406,67 @@ async def require_super_admin(request):
     ):
         return None, json_error("forbidden", 403)
     return player, None
+
+
+async def desktop_login_request_handler(request):
+    if not db_pool:
+        return json_error("service_unavailable", 503)
+    code = secrets.token_urlsafe(24)
+    async with request.app["db"].acquire() as conn:
+        await conn.execute("DELETE FROM desktop_login_requests WHERE expires_at < NOW() OR session_token IS NOT NULL")
+        await conn.execute(
+            "INSERT INTO desktop_login_requests (code, expires_at) VALUES ($1, NOW()+INTERVAL '5 minutes')",
+            code,
+        )
+    me = await bot.get_me()
+    if not me.username:
+        return json_error("bot_username_unavailable", 503)
+    return web.json_response({
+        "ok": True,
+        "code": code,
+        "expires_in": 300,
+        "bot_url": f"https://t.me/{me.username}?start=desktoplogin_{code}",
+    })
+
+
+async def desktop_login_status_handler(request):
+    code = request.match_info.get("code", "")
+    if len(code) < 20 or len(code) > 80:
+        return json_error("invalid_login_code", 400)
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT r.player_id, r.session_token, p.username, p.telegram_id,
+                          p.role, p.house_id, p.castle_name, h.name AS house_name,
+                          p.is_active, p.is_super_admin
+                   FROM desktop_login_requests r
+                   LEFT JOIN players p ON p.id=r.player_id
+                   LEFT JOIN houses h ON h.id=p.house_id
+                   WHERE r.code=$1 AND r.expires_at > NOW()
+                   FOR UPDATE OF r""",
+                code,
+            )
+            if not row:
+                return json_error("login_request_expired", 410)
+            if not row["session_token"]:
+                return web.json_response({"ok": True, "status": "pending"})
+            if not row["is_active"]:
+                await conn.execute("DELETE FROM desktop_login_requests WHERE code=$1", code)
+                return json_error("account_disabled", 403)
+            result = {
+                "ok": True,
+                "status": "approved",
+                "token": row["session_token"],
+                "player": {
+                    "id": row["player_id"], "username": row["username"],
+                    "telegram_id": row["telegram_id"], "role": row["role"],
+                    "house_id": row["house_id"], "castle_name": row["castle_name"],
+                    "house_name": row["house_name"], "is_active": row["is_active"],
+                    "is_super_admin": row["is_super_admin"],
+                },
+            }
+            await conn.execute("DELETE FROM desktop_login_requests WHERE code=$1", code)
+    return web.json_response(result)
 
 
 async def auth_handler(request):
@@ -2600,6 +2700,19 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_ip_created_idx ON player_sessions (ip_address, created_at DESC)")
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS desktop_login_requests (
+                code VARCHAR(80) PRIMARY KEY,
+                expires_at TIMESTAMPTZ NOT NULL,
+                telegram_id BIGINT,
+                player_id BIGINT REFERENCES players(id) ON DELETE CASCADE,
+                session_token TEXT,
+                approved_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS desktop_login_requests_expiry_idx ON desktop_login_requests (expires_at)")
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_login_requests (
                 telegram_id BIGINT PRIMARY KEY,
                 telegram_username VARCHAR(64) NOT NULL DEFAULT '',
@@ -2994,6 +3107,8 @@ def create_app():
     app.router.add_get("/play-v4", index_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
+    app.router.add_post("/api/auth/desktop/request", desktop_login_request_handler)
+    app.router.add_get("/api/auth/desktop/{code}", desktop_login_status_handler)
     app.router.add_get("/api/me", me_handler)
     app.router.add_get("/api/profiles", profiles_list_handler)
     app.router.add_get("/api/profiles/public", public_profiles_list_handler)
