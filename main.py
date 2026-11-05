@@ -635,6 +635,10 @@ CASTERLY_ROCK_COURT_TELEGRAM_IDS = [
     1606528421,  # Johanna Lannister
 ]
 
+CRAKEHALL_COURT_TELEGRAM_IDS = [
+    7066209583,  # Karent Crakehall
+]
+
 # Telegram accounts explicitly introduced as members of the court rosters.
 # Provision missing player rows so these users can pass /api/auth/telegram.
 COURT_PLAYER_ACCOUNTS = [
@@ -659,6 +663,7 @@ COURT_PLAYER_ACCOUNTS = [
     (7865635509, "Tyland Lannister"),
     (7379737762, "Loren Lannister"),
     (1606528421, "Johanna Lannister"),
+    (7066209583, "Karent Crakehall"),
 ]
 
 
@@ -726,8 +731,13 @@ async def castle_members_handler(request):
         normalize_court_name("کسترلی راک"),
         normalize_court_name("Casterly Rock"),
     )
+    is_crakehall = normalized_castle in (
+        normalize_court_name("کراکهال"),
+        normalize_court_name("کرکهال"),
+        normalize_court_name("Crakehall"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold or is_barrowton or is_casterly_rock:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold or is_barrowton or is_casterly_rock or is_crakehall:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -754,6 +764,8 @@ async def castle_members_handler(request):
                 else BARROWTON_COURT_TELEGRAM_IDS
                 if is_barrowton
                 else CASTERLY_ROCK_COURT_TELEGRAM_IDS
+                if is_casterly_rock
+                else CRAKEHALL_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -854,6 +866,8 @@ def player_court_castle(player):
         return "باروتون"
     if telegram_id in CASTERLY_ROCK_COURT_TELEGRAM_IDS:
         return "کسترلی‌راک"
+    if telegram_id in CRAKEHALL_COURT_TELEGRAM_IDS:
+        return "کراکهال"
     return player.get("castle_name")
 
 
@@ -3143,6 +3157,10 @@ async def on_startup(app):
         await conn.execute(
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
             "Roderick Dustin", "6008315341",
+        )
+        await conn.execute(
+            "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
+            "Karent Crakehall", "7066209583",
         )
         for display_name, member_id in (
             ("Jason Lannister", "7355922500"),
