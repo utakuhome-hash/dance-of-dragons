@@ -233,12 +233,12 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     if(hasRemote){
      const merged={...(local||{}),resources:{...((local&&local.resources)||{}),...(remote.resources||{})},buildings:{...((local&&local.buildings)||{}),...(remote.buildings||{})},queue:Array.isArray(remote.queue)?remote.queue:((local&&local.queue)||[])};
      localStorage.setItem(scopedKey,JSON.stringify(merged));
-     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(remoteStamp||Date.now()));
+     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(remoteStamp||Date.now()));localStorage.setItem('dod_house_server_revision_'+player.house_id,shared.updated_at||'');
      window.DOD?.refreshDashboard?.();
      const target=document.getElementById('view');if(target&&target.contentWindow){target.contentWindow.dispatchEvent(new Event('dod-state-change'));target.contentWindow.DOD?.refreshDashboard?.();}
     }else if(local){
      const seeded=await api('/api/my-house/state',{method:'PUT',body:JSON.stringify({resources:local.resources||{},buildings:local.buildings||{},queue:local.queue||[],expected_updated_at:shared.updated_at||null})});
-     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(Date.parse(seeded.updated_at||'')||Date.now()));
+     localStorage.setItem('dod_house_local_updated_'+player.house_id,String(Date.parse(seeded.updated_at||'')||Date.now()));localStorage.setItem('dod_house_server_revision_'+player.house_id,seeded.updated_at||'');
     }
    }catch(e){console.warn('Shared house warehouse sync unavailable:',e);}
   }
