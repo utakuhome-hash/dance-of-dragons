@@ -621,6 +621,10 @@ KARHOLD_COURT_TELEGRAM_IDS = [
     8772075836,  # Assis Karstark
 ]
 
+BARROWTON_COURT_TELEGRAM_IDS = [
+    6008315341,  # Roderick Dustin
+]
+
 # Telegram accounts explicitly introduced as members of the court rosters.
 # Provision missing player rows so these users can pass /api/auth/telegram.
 COURT_PLAYER_ACCOUNTS = [
@@ -640,6 +644,7 @@ COURT_PLAYER_ACCOUNTS = [
     (7847392550, "Rickon Stark"),
     (8848754881, "Benjen Stark"),
     (8772075836, "Assis Karstark"),
+    (6008315341, "Roderick Dustin"),
 ]
 
 
@@ -698,8 +703,12 @@ async def castle_members_handler(request):
         normalize_court_name("کارهولد"),
         normalize_court_name("Karhold"),
     )
+    is_barrowton = normalized_castle in (
+        normalize_court_name("باروتون"),
+        normalize_court_name("Barrowton"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold or is_barrowton:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -722,6 +731,8 @@ async def castle_members_handler(request):
                 else WINTERFELL_COURT_TELEGRAM_IDS
                 if is_winterfell
                 else KARHOLD_COURT_TELEGRAM_IDS
+                if is_karhold
+                else BARROWTON_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -818,6 +829,8 @@ def player_court_castle(player):
         return "وینترفل"
     if telegram_id in KARHOLD_COURT_TELEGRAM_IDS:
         return "کارهولد"
+    if telegram_id in BARROWTON_COURT_TELEGRAM_IDS:
+        return "باروتون"
     return player.get("castle_name")
 
 
@@ -3103,6 +3116,10 @@ async def on_startup(app):
         await conn.execute(
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
             "Assis Karstark", "8772075836",
+        )
+        await conn.execute(
+            "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
+            "Roderick Dustin", "6008315341",
         )
 
         # Provision the explicitly configured owner account as super-admin.
