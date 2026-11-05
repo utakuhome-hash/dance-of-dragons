@@ -587,6 +587,10 @@ CLAW_ISLE_COURT_TELEGRAM_IDS = [
     8128459841,  # Bartimos Celtigar
 ]
 
+DUSKENDALE_COURT_TELEGRAM_IDS = [
+    6669583051,  # Reynald Darklyn
+]
+
 
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
@@ -610,8 +614,13 @@ async def castle_members_handler(request):
         normalize_court_name("کلاور آیل"),
         normalize_court_name("Claw Isle"),
     )
+    is_duskendale = normalized_castle in (
+        normalize_court_name("دانکدایل"),
+        normalize_court_name("دانسکندیل"),
+        normalize_court_name("Duskendale"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -620,6 +629,8 @@ async def castle_members_handler(request):
                 else DRIFTMARK_COURT_TELEGRAM_IDS
                 if is_driftmark
                 else CLAW_ISLE_COURT_TELEGRAM_IDS
+                if is_claw_isle
+                else DUSKENDALE_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -702,6 +713,8 @@ def player_court_castle(player):
         return "دریفت‌مارک"
     if telegram_id in CLAW_ISLE_COURT_TELEGRAM_IDS:
         return "کلاوآیل"
+    if telegram_id in DUSKENDALE_COURT_TELEGRAM_IDS:
+        return "دانکدایل"
     return player.get("castle_name")
 
 
@@ -727,6 +740,12 @@ def can_manage_court(player, castle_name):
         normalize_court_name("Claw Isle"),
     ):
         return telegram_id == 8128459841
+    if castle in (
+        normalize_court_name("دانکدایل"),
+        normalize_court_name("دانسکندیل"),
+        normalize_court_name("Duskendale"),
+    ):
+        return telegram_id == 6669583051
     return (
         player.get("role") == "house_leader"
         and normalize_court_name(player.get("castle_name")) == castle
