@@ -54,6 +54,7 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
    <label for="newCharacterProfile">انتخاب کرکتر از فهرست کامل شخصیت‌ها</label><select id="newCharacterProfile" required style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></select><small style="display:block;color:#c9bda7;margin-top:5px">شخصیت موردنظر را از فهرست انتخاب کن.</small>
    <button type="submit">افزودن بازیکن</button><div id="adminFeedback" role="status"></div>
   </form><hr><h3>بازیکن‌های ثبت‌شده</h3><div id="playersList">در حال دریافت…</div>
+ <hr><h3>📱 حساب‌های مشترک روی یک دستگاه</h3><p style="font-size:12px;color:#c9bda7;line-height:1.8">فقط گروه‌هایی نمایش داده می‌شوند که یک شناسهٔ نصب مشترک بین بیش از یک حساب ثبت شده باشد. شناسهٔ کوتاه‌شده نمایش داده می‌شود.</p><button type="button" id="refreshDeviceGroups">به‌روزرسانی گزارش دستگاه‌ها</button><div id="deviceGroupsList">در حال دریافت…</div>
  <hr><h3>🏰 مدیریت اقتصاد خاندان‌ها</h3>
  <p style="font-size:12px;color:#c9bda7;line-height:1.8">دارایی فعلی و درآمد سالانهٔ هر خاندان را جداگانه ویرایش کن. اعداد به‌صورت مستقل برای همان خاندان ذخیره می‌شوند.</p>
  <label for="adminHouseEconomySelect">انتخاب خاندان</label>
@@ -307,7 +308,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   finally{btn.disabled=false;}
  }
  async function loadCharacterOptions(){const select=document.getElementById('newCharacterProfile');select.replaceChildren(new Option('در حال دریافت فهرست شخصیت‌ها…',''));try{const d=await api('/api/profiles/public');select.replaceChildren(new Option('یک شخصیت را انتخاب کن',''));(d.profiles||[]).forEach(p=>select.add(new Option(p.character_name+(p.house?' · خاندان '+p.house:'')+(p.title?' · '+p.title:''),String(p.id))));if(!d.profiles?.length)select.replaceChildren(new Option('شخصیتی ثبت نشده است',''));}catch(e){select.replaceChildren(new Option('دریافت فهرست ناموفق بود: '+e.message,''));}}
- async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadGameClockAdmin(),loadCharacterOptions()]);}
+ async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadDeviceGroups(),loadGameClockAdmin(),loadCharacterOptions()]);}
  async function loadGameClockAdmin(){
   const status=document.getElementById('gameClockAdminStatus'),start=document.getElementById('gameClockStart'),pause=document.getElementById('gameClockPause');
   try{const d=await api('/api/game-clock');status.textContent=(d.is_running?'ساعت فعال است':'ساعت متوقف است')+' · '+d.season_label+' · سال '+Number(d.game_year).toLocaleString('fa-IR')+' AC';start.disabled=!!d.is_running;pause.disabled=!d.is_running;}
@@ -504,6 +505,39 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
   }catch(e){list.textContent='دریافت فهرست انجام نشد: '+e.message;}
  }
+
+ async function loadDeviceGroups(){
+  const list=document.getElementById('deviceGroupsList');if(!list)return;
+  list.textContent='در حال بررسی شناسه‌های نصب…';
+  try{
+   const data=await api('/api/admin/device-groups');
+   list.replaceChildren();
+   const summary=document.createElement('p');
+   summary.style.cssText='color:#f0d69a;font-size:12px;line-height:1.8';
+   summary.textContent='تعداد دستگاه‌های مشترک: '+Number(data.device_count||0)+' · تعداد حساب‌های درگیر: '+Number(data.account_count||0);
+   list.append(summary);
+   if(!data.groups?.length){const empty=document.createElement('small');empty.textContent='فعلاً هیچ شناسهٔ نصب مشترکی بین چند حساب پیدا نشد.';list.append(empty);return;}
+   data.groups.forEach(group=>{
+    const card=document.createElement('div');
+    card.style.cssText='border:1px solid #80643c;border-radius:10px;padding:10px;margin:8px 0;background:#17140f';
+    const title=document.createElement('strong');
+    title.textContent='دستگاه …'+(group.device_key||'نامشخص')+' · '+Number(group.account_count||0)+' حساب';
+    const meta=document.createElement('small');
+    meta.style.cssText='display:block;color:#c9bda7;margin:5px 0;line-height:1.8';
+    const fmt=v=>v?new Date(v).toLocaleString('fa-IR'):'—';
+    meta.textContent='تعداد نشست‌های ثبت‌شده: '+Number(group.session_count||0)+' · اولین ورود: '+fmt(group.first_seen_at)+' · آخرین ورود: '+fmt(group.last_seen_at);
+    const accounts=document.createElement('div');
+    accounts.style.cssText='font-size:12px;line-height:2;color:#f4e5c5';
+    (group.accounts||[]).forEach(account=>{
+     const line=document.createElement('div');
+     line.textContent='• '+(account.username||'بدون نام')+' (#'+account.id+') · Telegram: '+(account.telegram_id||'ثبت‌نشده')+' · نشست: '+Number(account.session_count||0)+' · آخرین ورود: '+fmt(account.last_login_at);
+     accounts.append(line);
+    });
+    card.append(title,meta,accounts);list.append(card);
+   });
+  }catch(e){list.textContent='گزارش دستگاه‌ها دریافت نشد: '+e.message;}
+ }
+ document.getElementById('refreshDeviceGroups')?.addEventListener('click',loadDeviceGroups);
 
  async function loadLoginRequests(){
   const list=document.getElementById('loginRequestsList');if(!list)return;
