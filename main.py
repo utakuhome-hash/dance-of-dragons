@@ -597,6 +597,12 @@ HIGHGARDEN_COURT_TELEGRAM_IDS = [
     6531093504,  # Leo Tyrell
 ]
 
+OLDTOWN_COURT_TELEGRAM_IDS = [
+    8511148410,  # Otto Hightower
+    8849113201,  # Ormund Hightower
+    5269911726,  # Gwayne Hightower
+]
+
 
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
@@ -630,8 +636,13 @@ async def castle_members_handler(request):
         normalize_court_name("های‌گاردن"),
         normalize_court_name("Highgarden"),
     )
+    is_oldtown = normalized_castle in (
+        normalize_court_name("اولد تاون"),
+        normalize_court_name("اولدتاؤن"),
+        normalize_court_name("Oldtown"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -644,6 +655,8 @@ async def castle_members_handler(request):
                 else DUSKENDALE_COURT_TELEGRAM_IDS
                 if is_duskendale
                 else HIGHGARDEN_COURT_TELEGRAM_IDS
+                if is_highgarden
+                else OLDTOWN_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -730,6 +743,8 @@ def player_court_castle(player):
         return "دانکدایل"
     if telegram_id in HIGHGARDEN_COURT_TELEGRAM_IDS:
         return "هایگاردن"
+    if telegram_id in OLDTOWN_COURT_TELEGRAM_IDS:
+        return "اولد تاون"
     return player.get("castle_name")
 
 
