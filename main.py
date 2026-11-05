@@ -3048,7 +3048,7 @@ async def on_startup(app):
                     END,
                     '', $1, 'player', TRUE, FALSE
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM players WHERE telegram_id = $1
+                    SELECT 1 FROM players WHERE telegram_id = $1::bigint
                 )
                 ON CONFLICT DO NOTHING
                 """,
