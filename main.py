@@ -603,6 +603,21 @@ OLDTOWN_COURT_TELEGRAM_IDS = [
     5269911726,  # Gwayne Hightower
 ]
 
+# Telegram accounts explicitly introduced as members of the court rosters.
+# Provision missing player rows so these users can pass /api/auth/telegram.
+COURT_PLAYER_ACCOUNTS = [
+    (7650983591, "Corlys Velaryon"),
+    (6541635048, "Alan Velaryon"),
+    (8128459841, "Bartimos Celtigar"),
+    (6669583051, "Reynald Darklyn"),
+    (435808866, "Lionel Tyrell"),
+    (1214060391, "Loras Tyrell"),
+    (6531093504, "Leo Tyrell"),
+    (8511148410, "Otto Hightower"),
+    (8849113201, "Ormund Hightower"),
+    (5269911726, "Gwayne Hightower"),
+]
+
 
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
@@ -2993,6 +3008,32 @@ async def on_startup(app):
         await conn.execute(
             "DELETE FROM telegram_login_requests WHERE last_seen_at < NOW() - INTERVAL '30 days'"
         )
+
+        # Create player rows for known court members who do not yet have an account.
+        # If a display name is already taken by another account, keep it unique by
+        # suffixing the Telegram ID; never reassign an existing player's Telegram ID.
+        for telegram_id, character_name in COURT_PLAYER_ACCOUNTS:
+            await conn.execute(
+                """
+                INSERT INTO players
+                    (username, password_hash, telegram_id, role, is_active, is_super_admin)
+                SELECT
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM players
+                            WHERE LOWER(username) = LOWER($2)
+                        )
+                        THEN LEFT($2, 35) || '_' || $1::text
+                        ELSE $2
+                    END,
+                    '', $1, 'player', TRUE, FALSE
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM players WHERE telegram_id = $1
+                )
+                ON CONFLICT DO NOTHING
+                """,
+                telegram_id, character_name,
+            )
 
         # Provision the explicitly configured owner account as super-admin.
         super_admin_telegram_id = os.getenv("SUPER_ADMIN_TELEGRAM_ID", "").strip()
