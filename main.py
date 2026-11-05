@@ -552,21 +552,54 @@ async def auth_handler(request):
     })
 
 
+KINGSLANDING_COURT_TELEGRAM_IDS = [
+    6523502457,  # Aegon
+    1679850486,  # Aemond
+    6075025172,  # Helaena
+    1057851448,  # Alicent
+    8586298875,  # Erryk Cargyll
+    8590353980,  # Ser Luthor
+    8893096451,  # Ser Criston Cole
+    8774384348,  # Ulf White
+    8823771080,  # Grand Maester
+]
+
+
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
     if not castle_name or len(castle_name) > 150:
         return json_error("invalid_castle_name")
+    normalized_castle = normalize_court_name(castle_name)
+    is_kings_landing = normalized_castle in (
+        normalize_court_name("کینگزلندینگ"),
+        normalize_court_name("King's Landing"),
+    )
     async with request.app["db"].acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT p.username, h.name AS house_name
-            FROM players p
-            LEFT JOIN houses h ON h.id = p.house_id
-            WHERE p.is_active = TRUE AND p.castle_name = $1
-            ORDER BY p.username
-            """,
-            castle_name,
-        )
+        if is_kings_landing:
+            rows = await conn.fetch(
+                """
+                SELECT p.username, h.name AS house_name
+                FROM players p
+                LEFT JOIN houses h ON h.id = p.house_id
+                WHERE p.is_active = TRUE
+                  AND p.castle_name = $1
+                  AND p.telegram_id = ANY($2::bigint[])
+                ORDER BY p.username
+                """,
+                castle_name,
+                KINGSLANDING_COURT_TELEGRAM_IDS,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT p.username, h.name AS house_name
+                FROM players p
+                LEFT JOIN houses h ON h.id = p.house_id
+                WHERE p.is_active = TRUE AND p.castle_name = $1
+                ORDER BY p.username
+                """,
+                castle_name,
+            )
     return web.json_response({
         "ok": True,
         "castle": castle_name,
