@@ -1526,34 +1526,32 @@ async def admin_device_groups_handler(request):
         return error
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch("""
-            SELECT s.install_id,
-                   COUNT(DISTINCT s.player_id) AS account_count,
-                   COUNT(*) AS session_count,
-                   MIN(s.created_at) AS first_seen_at,
-                   MAX(s.created_at) AS last_seen_at,
+            WITH account_sessions AS (
+                SELECT install_id, player_id,
+                       COUNT(*) AS session_count,
+                       MIN(created_at) AS first_login_at,
+                       MAX(created_at) AS last_login_at
+                FROM player_sessions
+                WHERE install_id IS NOT NULL AND install_id <> ''
+                GROUP BY install_id, player_id
+            )
+            SELECT a.install_id,
+                   COUNT(*) AS account_count,
+                   SUM(a.session_count) AS session_count,
+                   MIN(a.first_login_at) AS first_seen_at,
+                   MAX(a.last_login_at) AS last_seen_at,
                    json_agg(json_build_object(
                        'id', p.id,
                        'username', p.username,
                        'telegram_id', p.telegram_id,
-                       'last_login_at', account_sessions.last_login_at,
-                       'session_count', account_sessions.session_count
+                       'last_login_at', a.last_login_at,
+                       'session_count', a.session_count
                    ) ORDER BY p.username) AS accounts
-            FROM player_sessions s
-            JOIN players p ON p.id = s.player_id
-            JOIN (
-                SELECT install_id, player_id,
-                       MAX(created_at) AS last_login_at,
-                       COUNT(*) AS session_count
-                FROM player_sessions
-                WHERE install_id IS NOT NULL AND install_id <> ''
-                GROUP BY install_id, player_id
-            ) account_sessions
-              ON account_sessions.install_id = s.install_id
-             AND account_sessions.player_id = s.player_id
-            WHERE s.install_id IS NOT NULL AND s.install_id <> ''
-            GROUP BY s.install_id
-            HAVING COUNT(DISTINCT s.player_id) > 1
-            ORDER BY MAX(s.created_at) DESC
+            FROM account_sessions a
+            JOIN players p ON p.id = a.player_id
+            GROUP BY a.install_id
+            HAVING COUNT(*) > 1
+            ORDER BY MAX(a.last_login_at) DESC
         """)
     groups = []
     for row in rows:
