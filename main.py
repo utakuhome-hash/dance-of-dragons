@@ -2312,6 +2312,23 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
     return state
 
 
+def _canonical_house_resources(house_resources, game_resources):
+    house_resources = house_resources if isinstance(house_resources, dict) else {}
+    game_resources = game_resources if isinstance(game_resources, dict) else {}
+    result = dict(game_resources)
+    for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+        if key in house_resources:
+            result[key] = house_resources[key]
+    special = dict(game_resources.get("specialGoods") or {})
+    for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                           ("spice", "spice"), ("salt", "salt"),
+                           ("black_iron", "blackIron"), ("blackIron", "blackIron")):
+        if source in house_resources:
+            special[target] = house_resources[source]
+    result["specialGoods"] = special
+    return result
+
+
 async def my_house_state_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
@@ -2321,10 +2338,12 @@ async def my_house_state_handler(request):
     import json
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow("SELECT game_state, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
+            row = await conn.fetchrow("SELECT game_state, resources, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
             if not row:
                 return json_error("house_not_found", 404)
             state = _json_object(row["game_state"])
+            house_resources = _json_object(row["resources"])
+            state["resources"] = _canonical_house_resources(house_resources, state.get("resources"))
             updated_at = row["game_state_updated_at"]
             clock = await read_game_clock(conn)
             changed = False
@@ -2341,8 +2360,20 @@ async def my_house_state_handler(request):
                     state["_lastIncomeYear"] = year
                     changed = True
             if changed:
-                await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
-                    json.dumps(state, ensure_ascii=False), player["house_id"])
+                resources = state.get("resources") or {}
+                special = resources.get("specialGoods") or {}
+                for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+                    if key in resources:
+                        house_resources[key] = resources[key]
+                for key, source in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                                    ("spice", "spice"), ("salt", "salt"), ("black_iron", "blackIron")):
+                    if source in special:
+                        house_resources[key] = special[source]
+                await conn.execute(
+                    "UPDATE houses SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW() WHERE id=$3",
+                    json.dumps(state, ensure_ascii=False), json.dumps(house_resources, ensure_ascii=False),
+                    player["house_id"],
+                )
                 updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
     return web.json_response({"ok": True, "state": state, "updated_at": updated_at.isoformat() if updated_at else None, "game_year": clock["game_year"] if clock else None})
 
@@ -2380,8 +2411,23 @@ async def my_house_state_update_handler(request):
                 return json_error("stale_house_state", 409)
             current = _json_object(row["game_state"])
             current.update(incoming)
-            await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
-                json.dumps(current, ensure_ascii=False), player["house_id"])
+            house_resources = _json_object(await conn.fetchval(
+                "SELECT resources FROM houses WHERE id=$1", player["house_id"]
+            ))
+            resources = incoming["resources"]
+            for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+                if key in resources:
+                    house_resources[key] = resources[key]
+            special = resources.get("specialGoods") if isinstance(resources.get("specialGoods"), dict) else {}
+            for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                                   ("spice", "spice"), ("salt", "salt"), ("blackIron", "black_iron")):
+                if source in special:
+                    house_resources[target] = special[source]
+            await conn.execute(
+                "UPDATE houses SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW() WHERE id=$3",
+                json.dumps(current, ensure_ascii=False), json.dumps(house_resources, ensure_ascii=False),
+                player["house_id"],
+            )
             updated_at = await conn.fetchval("SELECT game_state_updated_at FROM houses WHERE id=$1", player["house_id"])
     return web.json_response({"ok": True, "updated_at": updated_at.isoformat() if updated_at else None})
 
