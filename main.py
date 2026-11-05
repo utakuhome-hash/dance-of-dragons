@@ -582,11 +582,9 @@ async def castle_members_handler(request):
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 WHERE p.is_active = TRUE
-                  AND p.castle_name = $1
-                  AND p.telegram_id = ANY($2::bigint[])
+                  AND p.telegram_id = ANY($1::bigint[])
                 ORDER BY p.username
                 """,
-                castle_name,
                 KINGSLANDING_COURT_TELEGRAM_IDS,
             )
         else:
