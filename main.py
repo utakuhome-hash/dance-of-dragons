@@ -3052,7 +3052,7 @@ async def on_startup(app):
                 )
                 ON CONFLICT DO NOTHING
                 """,
-                telegram_id, character_name,
+                str(telegram_id), character_name,
             )
 
         # Provision the explicitly configured owner account as super-admin.
