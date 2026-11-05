@@ -229,12 +229,8 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     const shared=await api('/api/my-house/state');
     const remote=shared.state||{},hasRemote=remote.resources&&remote.buildings&&Object.keys(remote).length>0;
     let local=null;try{local=JSON.parse(localStorage.getItem(scopedKey)||'null')}catch(e){}
-    const localStamp=Number(localStorage.getItem('dod_house_local_updated_'+player.house_id)||0);
     const remoteStamp=Date.parse(shared.updated_at||'')||0;
-    if(hasRemote&&local&&localStamp>remoteStamp){
-     const pushed=await api('/api/my-house/state',{method:'PUT',body:JSON.stringify({resources:local.resources||{},buildings:local.buildings||{},queue:local.queue||[]})});
-     if(pushed.updated_at)localStorage.setItem('dod_house_local_updated_'+player.house_id,String(Date.parse(pushed.updated_at)||Date.now()));
-    }else if(hasRemote){
+    if(hasRemote){
      const merged={...(local||{}),resources:{...((local&&local.resources)||{}),...(remote.resources||{})},buildings:{...((local&&local.buildings)||{}),...(remote.buildings||{})},queue:Array.isArray(remote.queue)?remote.queue:((local&&local.queue)||[])};
      localStorage.setItem(scopedKey,JSON.stringify(merged));
      localStorage.setItem('dod_house_local_updated_'+player.house_id,String(remoteStamp||Date.now()));
