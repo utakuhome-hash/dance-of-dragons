@@ -603,6 +603,10 @@ OLDTOWN_COURT_TELEGRAM_IDS = [
     5269911726,  # Gwayne Hightower
 ]
 
+ARBOR_COURT_TELEGRAM_IDS = [
+    8345844522,  # Garth Redwyne
+]
+
 # Telegram accounts explicitly introduced as members of the court rosters.
 # Provision missing player rows so these users can pass /api/auth/telegram.
 COURT_PLAYER_ACCOUNTS = [
@@ -616,6 +620,7 @@ COURT_PLAYER_ACCOUNTS = [
     (8511148410, "Otto Hightower"),
     (8849113201, "Ormund Hightower"),
     (5269911726, "Gwayne Hightower"),
+    (8345844522, "Garth Redwyne"),
 ]
 
 
@@ -656,8 +661,13 @@ async def castle_members_handler(request):
         normalize_court_name("اولدتاؤن"),
         normalize_court_name("Oldtown"),
     )
+    is_arbor = normalized_castle in (
+        normalize_court_name("آربور"),
+        normalize_court_name("The Arbor"),
+        normalize_court_name("Arbor"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -672,6 +682,8 @@ async def castle_members_handler(request):
                 else HIGHGARDEN_COURT_TELEGRAM_IDS
                 if is_highgarden
                 else OLDTOWN_COURT_TELEGRAM_IDS
+                if is_oldtown
+                else ARBOR_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -760,6 +772,8 @@ def player_court_castle(player):
         return "هایگاردن"
     if telegram_id in OLDTOWN_COURT_TELEGRAM_IDS:
         return "اولد تاون"
+    if telegram_id in ARBOR_COURT_TELEGRAM_IDS:
+        return "آربور"
     return player.get("castle_name")
 
 
@@ -791,6 +805,12 @@ def can_manage_court(player, castle_name):
         normalize_court_name("Duskendale"),
     ):
         return telegram_id == 6669583051
+    if castle in (
+        normalize_court_name("آربور"),
+        normalize_court_name("The Arbor"),
+        normalize_court_name("Arbor"),
+    ):
+        return telegram_id == 8345844522
     return (
         player.get("role") == "house_leader"
         and normalize_court_name(player.get("castle_name")) == castle
