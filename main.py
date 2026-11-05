@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -1648,9 +1649,21 @@ async def admin_device_groups_handler(request):
         for field in ("first_seen_at", "last_seen_at"):
             if item.get(field) is not None:
                 item[field] = item[field].isoformat()
-        for account in item.get("accounts") or []:
-            if account.get("last_login_at") is not None:
-                account["last_login_at"] = account["last_login_at"].isoformat()
+        accounts = item.get("accounts") or []
+        if isinstance(accounts, str):
+            try:
+                accounts = json.loads(accounts)
+            except (TypeError, ValueError):
+                accounts = []
+        if not isinstance(accounts, list):
+            accounts = []
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            last_login_at = account.get("last_login_at")
+            if hasattr(last_login_at, "isoformat"):
+                account["last_login_at"] = last_login_at.isoformat()
+        item["accounts"] = [account for account in accounts if isinstance(account, dict)]
         groups.append(item)
     return web.json_response({"ok": True, "groups": groups, "device_count": len(groups),
                               "account_count": len({a["id"] for g in groups for a in g["accounts"]})})
