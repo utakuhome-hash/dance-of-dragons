@@ -607,6 +607,10 @@ ARBOR_COURT_TELEGRAM_IDS = [
     8345844522,  # Garth Redwyne
 ]
 
+TARLY_COURT_TELEGRAM_IDS = [
+    8605396069,  # Alan Tarly
+]
+
 # Telegram accounts explicitly introduced as members of the court rosters.
 # Provision missing player rows so these users can pass /api/auth/telegram.
 COURT_PLAYER_ACCOUNTS = [
@@ -621,6 +625,7 @@ COURT_PLAYER_ACCOUNTS = [
     (8849113201, "Ormund Hightower"),
     (5269911726, "Gwayne Hightower"),
     (8345844522, "Garth Redwyne"),
+    (8605396069, "Alan Tarly"),
 ]
 
 
@@ -666,8 +671,13 @@ async def castle_members_handler(request):
         normalize_court_name("The Arbor"),
         normalize_court_name("Arbor"),
     )
+    is_horn_hill = normalized_castle in (
+        normalize_court_name("هورن‌هیل"),
+        normalize_court_name("هورن هیل"),
+        normalize_court_name("Horn Hill"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -684,6 +694,8 @@ async def castle_members_handler(request):
                 else OLDTOWN_COURT_TELEGRAM_IDS
                 if is_oldtown
                 else ARBOR_COURT_TELEGRAM_IDS
+                if is_arbor
+                else TARLY_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -774,6 +786,8 @@ def player_court_castle(player):
         return "اولد تاون"
     if telegram_id in ARBOR_COURT_TELEGRAM_IDS:
         return "آربور"
+    if telegram_id in TARLY_COURT_TELEGRAM_IDS:
+        return "هورن‌هیل"
     return player.get("castle_name")
 
 
