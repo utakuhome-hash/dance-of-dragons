@@ -116,7 +116,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
  const api=async(path,opts={})=>{
   const headers=Object.assign({'Content-Type':'application/json','X-Game-Install-ID':getGameInstallId()},opts.headers||{});
   if(token) headers.Authorization='Bearer '+token;
-  const r=await fetch(path,Object.assign({},opts,{headers}));
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);let r;try{r=await fetch(path,Object.assign({},opts,{headers,signal:controller.signal}));}catch(error){if(error&&error.name==='AbortError')throw new Error('سرور در ۲۰ ثانیه پاسخ نداد. اتصال اینترنت را بررسی کن و دوباره تلاش کن.');throw new Error('ارتباط با سرور برقرار نشد: '+(error.message||'خطای شبکه'));}finally{clearTimeout(timeout);}
   const d=await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(d.error||'خطا در ارتباط با سرور');
   return d;
