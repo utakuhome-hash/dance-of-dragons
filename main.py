@@ -577,6 +577,11 @@ DRAGONSTONE_COURT_TELEGRAM_IDS = [
     8925154779,  # Ser Willam Royce
 ]
 
+DRIFTMARK_COURT_TELEGRAM_IDS = [
+    7650983591,  # Corlys Velaryon
+    6541635048,  # Alan Velaryon
+]
+
 
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
@@ -591,12 +596,18 @@ async def castle_members_handler(request):
         normalize_court_name("دراگون‌استون"),
         normalize_court_name("Dragonstone"),
     )
+    is_driftmark = normalized_castle in (
+        normalize_court_name("دریفت‌مارک"),
+        normalize_court_name("Driftmark"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone:
+        if is_kings_landing or is_dragonstone or is_driftmark:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
                 else DRAGONSTONE_COURT_TELEGRAM_IDS
+                if is_dragonstone
+                else DRIFTMARK_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -675,6 +686,8 @@ def player_court_castle(player):
         return "دراگون‌استون"
     if telegram_id in KINGSLANDING_COURT_TELEGRAM_IDS:
         return "کینگزلندینگ"
+    if telegram_id in DRIFTMARK_COURT_TELEGRAM_IDS:
+        return "دریفت‌مارک"
     return player.get("castle_name")
 
 
@@ -692,6 +705,8 @@ def can_manage_court(player, castle_name):
         return telegram_id == 6523502457
     if castle in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
         return telegram_id == 5632444639
+    if castle in (normalize_court_name("دریفت‌مارک"), normalize_court_name("Driftmark")):
+        return telegram_id == 7650983591
     return (
         player.get("role") == "house_leader"
         and normalize_court_name(player.get("castle_name")) == castle
