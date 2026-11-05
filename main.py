@@ -3046,7 +3046,7 @@ async def on_startup(app):
                         THEN LEFT($2, 35) || '_' || $1::text
                         ELSE $2
                     END,
-                    '', $1, 'player', TRUE, FALSE
+                    '', $1::bigint, 'player', TRUE, FALSE
                 WHERE NOT EXISTS (
                     SELECT 1 FROM players WHERE telegram_id = $1::bigint
                 )
