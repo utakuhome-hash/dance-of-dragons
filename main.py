@@ -618,7 +618,7 @@ WINTERFELL_COURT_TELEGRAM_IDS = [
 ]
 
 KARHOLD_COURT_TELEGRAM_IDS = [
-    8772075836,  # Alys Karstark
+    8772075836,  # Assis Karstark
 ]
 
 # Telegram accounts explicitly introduced as members of the court rosters.
@@ -639,7 +639,7 @@ COURT_PLAYER_ACCOUNTS = [
     (6915810212, "Cregan Stark"),
     (7847392550, "Rickon Stark"),
     (8848754881, "Benjen Stark"),
-    (8772075836, "Alys Karstark"),
+    (8772075836, "Assis Karstark"),
 ]
 
 
@@ -3098,6 +3098,12 @@ async def on_startup(app):
                 """,
                 str(telegram_id), character_name,
             )
+
+        # Keep the existing Karhold member's display name in sync.
+        await conn.execute(
+            "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
+            "Assis Karstark", "8772075836",
+        )
 
         # Provision the explicitly configured owner account as super-admin.
         super_admin_telegram_id = os.getenv("SUPER_ADMIN_TELEGRAM_ID", "").strip()
