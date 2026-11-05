@@ -615,6 +615,7 @@ WINTERFELL_COURT_TELEGRAM_IDS = [
     6915810212,  # Cregan Stark
     7847392550,  # Rickon Stark
     8848754881,  # Benjen Stark
+    8772075836,  # Alys Karstark
 ]
 
 # Telegram accounts explicitly introduced as members of the court rosters.
@@ -635,6 +636,7 @@ COURT_PLAYER_ACCOUNTS = [
     (6915810212, "Cregan Stark"),
     (7847392550, "Rickon Stark"),
     (8848754881, "Benjen Stark"),
+    (8772075836, "Alys Karstark"),
 ]
 
 
