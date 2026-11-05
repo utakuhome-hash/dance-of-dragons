@@ -188,6 +188,9 @@ HOUSE_SEEDS = [
 # Applied at startup so existing players receive their house without manual admin edits.
 PLAYER_HOUSE_ASSIGNMENTS = [
     (7355922500, "لنیستر"),
+    (7865635509, "لنیستر"),
+    (7379737762, "لنیستر"),
+    (1606528421, "لنیستر"),
     (7066209583, "کراکهال"),
     (6850075647, "لفورد"),
     (7379737762, "لنیستر"),
@@ -625,6 +628,13 @@ BARROWTON_COURT_TELEGRAM_IDS = [
     6008315341,  # Roderick Dustin
 ]
 
+CASTERLY_ROCK_COURT_TELEGRAM_IDS = [
+    7355922500,  # Jason Lannister
+    7865635509,  # Tyland Lannister
+    7379737762,  # Loren Lannister
+    1606528421,  # Johanna Lannister
+]
+
 # Telegram accounts explicitly introduced as members of the court rosters.
 # Provision missing player rows so these users can pass /api/auth/telegram.
 COURT_PLAYER_ACCOUNTS = [
@@ -645,6 +655,10 @@ COURT_PLAYER_ACCOUNTS = [
     (8848754881, "Benjen Stark"),
     (8772075836, "Assis Karstark"),
     (6008315341, "Roderick Dustin"),
+    (7355922500, "Jason Lannister"),
+    (7865635509, "Tyland Lannister"),
+    (7379737762, "Loren Lannister"),
+    (1606528421, "Johanna Lannister"),
 ]
 
 
@@ -707,8 +721,13 @@ async def castle_members_handler(request):
         normalize_court_name("باروتون"),
         normalize_court_name("Barrowton"),
     )
+    is_casterly_rock = normalized_castle in (
+        normalize_court_name("کسترلی‌راک"),
+        normalize_court_name("کسترلی راک"),
+        normalize_court_name("Casterly Rock"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold or is_barrowton:
+        if is_kings_landing or is_dragonstone or is_driftmark or is_claw_isle or is_duskendale or is_highgarden or is_oldtown or is_arbor or is_horn_hill or is_winterfell or is_karhold or is_barrowton or is_casterly_rock:
             approved_ids = (
                 KINGSLANDING_COURT_TELEGRAM_IDS
                 if is_kings_landing
@@ -733,6 +752,8 @@ async def castle_members_handler(request):
                 else KARHOLD_COURT_TELEGRAM_IDS
                 if is_karhold
                 else BARROWTON_COURT_TELEGRAM_IDS
+                if is_barrowton
+                else CASTERLY_ROCK_COURT_TELEGRAM_IDS
             )
             rows = await conn.fetch(
                 """
@@ -831,6 +852,8 @@ def player_court_castle(player):
         return "کارهولد"
     if telegram_id in BARROWTON_COURT_TELEGRAM_IDS:
         return "باروتون"
+    if telegram_id in CASTERLY_ROCK_COURT_TELEGRAM_IDS:
+        return "کسترلی‌راک"
     return player.get("castle_name")
 
 
@@ -3121,6 +3144,16 @@ async def on_startup(app):
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
             "Roderick Dustin", "6008315341",
         )
+        for display_name, member_id in (
+            ("Jason Lannister", "7355922500"),
+            ("Tyland Lannister", "7865635509"),
+            ("Loren Lannister", "7379737762"),
+            ("Johanna Lannister", "1606528421"),
+        ):
+            await conn.execute(
+                "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
+                display_name, member_id,
+            )
 
         # Provision the explicitly configured owner account as super-admin.
         super_admin_telegram_id = os.getenv("SUPER_ADMIN_TELEGRAM_ID", "").strip()
