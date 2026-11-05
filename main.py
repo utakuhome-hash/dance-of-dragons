@@ -664,17 +664,34 @@ def court_posts_for_castle(castle_name):
     }
 
 
+def player_court_castle(player):
+    if not player:
+        return None
+    try:
+        telegram_id = int(player.get("telegram_id") or 0)
+    except (TypeError, ValueError):
+        telegram_id = 0
+    if telegram_id in DRAGONSTONE_COURT_TELEGRAM_IDS:
+        return "دراگون‌استون"
+    if telegram_id in KINGSLANDING_COURT_TELEGRAM_IDS:
+        return "کینگزلندینگ"
+    return player.get("castle_name")
+
+
 def can_manage_court(player, castle_name):
     if not player or not player.get("is_active"):
         return False
     if player.get("is_super_admin"):
         return True
-    user = normalize_court_name(player.get("username"))
+    try:
+        telegram_id = int(player.get("telegram_id") or 0)
+    except (TypeError, ValueError):
+        telegram_id = 0
     castle = normalize_court_name(castle_name)
     if castle in (normalize_court_name("کینگزلندینگ"), normalize_court_name("King's Landing")):
-        return "اگان" in user or "aegon" in user
+        return telegram_id == 6523502457
     if castle in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
-        return "رینیرا" in user or "rhaenyra" in user
+        return telegram_id == 5632444639
     return (
         player.get("role") == "house_leader"
         and normalize_court_name(player.get("castle_name")) == castle
@@ -711,10 +728,11 @@ async def court_appointments_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
-    castle_name = str(request.query.get("castle_name") or player.get("castle_name") or "").strip()
+    effective_castle = player_court_castle(player)
+    castle_name = str(request.query.get("castle_name") or effective_castle or "").strip()
     if not castle_name or len(castle_name) > 150:
         return json_error("invalid_castle_name")
-    if not player.get("is_super_admin") and normalize_court_name(castle_name) != normalize_court_name(player.get("castle_name")):
+    if not player.get("is_super_admin") and normalize_court_name(castle_name) != normalize_court_name(effective_castle):
         return json_error("forbidden", 403)
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch(
@@ -755,7 +773,8 @@ async def court_appointment_update_handler(request):
         data = await request.json()
     except Exception:
         return json_error("invalid_json")
-    castle_name = str(data.get("castle_name") or player.get("castle_name") or "").strip()
+    effective_castle = player_court_castle(player)
+    castle_name = str(data.get("castle_name") or effective_castle or "").strip()
     post_key = str(data.get("post_key") or "").strip()
     appointee_name = str(data.get("appointee_name") or "").strip()
     if not castle_name or len(castle_name) > 150 or len(appointee_name) > 150:
