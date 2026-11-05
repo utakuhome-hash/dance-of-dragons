@@ -1520,6 +1520,56 @@ async def admin_players_handler(request):
     })
 
 
+async def admin_device_groups_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT s.install_id,
+                   COUNT(DISTINCT s.player_id) AS account_count,
+                   COUNT(*) AS session_count,
+                   MIN(s.created_at) AS first_seen_at,
+                   MAX(s.created_at) AS last_seen_at,
+                   json_agg(json_build_object(
+                       'id', p.id,
+                       'username', p.username,
+                       'telegram_id', p.telegram_id,
+                       'last_login_at', account_sessions.last_login_at,
+                       'session_count', account_sessions.session_count
+                   ) ORDER BY p.username) AS accounts
+            FROM player_sessions s
+            JOIN players p ON p.id = s.player_id
+            JOIN (
+                SELECT install_id, player_id,
+                       MAX(created_at) AS last_login_at,
+                       COUNT(*) AS session_count
+                FROM player_sessions
+                WHERE install_id IS NOT NULL AND install_id <> ''
+                GROUP BY install_id, player_id
+            ) account_sessions
+              ON account_sessions.install_id = s.install_id
+             AND account_sessions.player_id = s.player_id
+            WHERE s.install_id IS NOT NULL AND s.install_id <> ''
+            GROUP BY s.install_id
+            HAVING COUNT(DISTINCT s.player_id) > 1
+            ORDER BY MAX(s.created_at) DESC
+        """)
+    groups = []
+    for row in rows:
+        item = dict(row)
+        item["device_key"] = str(item.pop("install_id"))[-8:]
+        for field in ("first_seen_at", "last_seen_at"):
+            if item.get(field) is not None:
+                item[field] = item[field].isoformat()
+        for account in item.get("accounts") or []:
+            if account.get("last_login_at") is not None:
+                account["last_login_at"] = account["last_login_at"].isoformat()
+        groups.append(item)
+    return web.json_response({"ok": True, "groups": groups, "device_count": len(groups),
+                              "account_count": len({a["id"] for g in groups for a in g["accounts"]})})
+
+
 async def admin_login_requests_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -3140,6 +3190,7 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/active", admin_set_player_active_handler)
     app.router.add_post("/api/logout", logout_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
+    app.router.add_get("/api/admin/device-groups", admin_device_groups_handler)
     app.router.add_get("/api/admin/login-requests", admin_login_requests_handler)
     app.router.add_post("/api/admin/login-requests/{telegram_id}/assign", admin_assign_login_request_handler)
     app.router.add_get("/api/admin/houses", admin_houses_handler)
