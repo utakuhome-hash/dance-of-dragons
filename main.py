@@ -564,6 +564,19 @@ KINGSLANDING_COURT_TELEGRAM_IDS = [
     8823771080,  # Grand Maester
 ]
 
+DRAGONSTONE_COURT_TELEGRAM_IDS = [
+    5632444639,  # Rhaenyra Targaryen
+    7551277757,  # Daemon Targaryen
+    8897601678,  # Rhaenys Targaryen
+    8845823478,  # Baela Targaryen
+    6751495290,  # Jacaerys Velaryon
+    8082440635,  # Addam Velaryon
+    7122047466,  # Hugh Hammer
+    8537207185,  # Erryk Cargyll
+    1183064616,  # Ser Lorent Marbrand
+    8925154779,  # Ser Willam Royce
+]
+
 
 async def castle_members_handler(request):
     castle_name = request.match_info["castle_name"].strip()
@@ -574,8 +587,17 @@ async def castle_members_handler(request):
         normalize_court_name("کینگزلندینگ"),
         normalize_court_name("King's Landing"),
     )
+    is_dragonstone = normalized_castle in (
+        normalize_court_name("دراگون‌استون"),
+        normalize_court_name("Dragonstone"),
+    )
     async with request.app["db"].acquire() as conn:
-        if is_kings_landing:
+        if is_kings_landing or is_dragonstone:
+            approved_ids = (
+                KINGSLANDING_COURT_TELEGRAM_IDS
+                if is_kings_landing
+                else DRAGONSTONE_COURT_TELEGRAM_IDS
+            )
             rows = await conn.fetch(
                 """
                 SELECT p.username, h.name AS house_name
@@ -585,7 +607,7 @@ async def castle_members_handler(request):
                   AND p.telegram_id = ANY($1::bigint[])
                 ORDER BY p.username
                 """,
-                KINGSLANDING_COURT_TELEGRAM_IDS,
+                approved_ids,
             )
         else:
             rows = await conn.fetch(
@@ -3029,6 +3051,19 @@ async def on_startup(app):
                         dragon = COALESCE(character_profiles.dragon, EXCLUDED.dragon),
                         house = COALESCE(character_profiles.house, EXCLUDED.house)
                 """, character_name, castle_name)
+        # These four characters are not married in the current game timeline.
+        # Keep both sides of each pair explicitly unmarried in their public profiles.
+        await conn.execute("""
+            UPDATE character_profiles
+            SET spouse = 'هنوز ازدواج نکرده',
+                updated_at = NOW()
+            WHERE character_name IN (
+                'Rhaenyra Targaryen',
+                'Daemon Targaryen',
+                'Baela Targaryen',
+                'Jacaerys Velaryon'
+            )
+        """)
         # Daeron's canonical seat is Oldtown; correct any legacy profile location
         # so every public/profile view uses the same castle.
         await conn.execute("""
