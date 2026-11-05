@@ -2372,8 +2372,12 @@ async def my_house_state_update_handler(request):
         return json_error("invalid_state")
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow("SELECT game_state FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
+            row = await conn.fetchrow("SELECT game_state, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
             if not row: return json_error("house_not_found", 404)
+            expected_updated_at = data.get("expected_updated_at")
+            current_updated_at = row["game_state_updated_at"]
+            if current_updated_at and (not expected_updated_at or expected_updated_at != current_updated_at.isoformat()):
+                return json_error("stale_house_state", 409)
             current = _json_object(row["game_state"])
             current.update(incoming)
             await conn.execute("UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
