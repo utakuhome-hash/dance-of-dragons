@@ -2654,6 +2654,11 @@ async def my_house_state_handler(request):
             house_resources = _json_object(row["resources"])
             state["resources"] = _canonical_house_resources(house_resources, state.get("resources"))
             updated_at = row["game_state_updated_at"]
+            if not updated_at:
+                updated_at = await conn.fetchval(
+                    "UPDATE houses SET game_state_updated_at=NOW() WHERE id=$1 RETURNING game_state_updated_at",
+                    player["house_id"],
+                )
             clock = await read_game_clock(conn)
             changed = False
             if clock and clock.get("is_running"):
