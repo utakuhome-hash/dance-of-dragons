@@ -298,7 +298,8 @@ async def start_handler(message: Message):
                 await message.answer("این درخواست ورود منقضی شده یا قبلاً استفاده شده است. صفحه بازی را تازه‌سازی و دوباره درخواست بده.")
                 return
             player = await conn.fetchrow(
-                """SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
+                """SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                          COALESCE(NULLIF(p.castle_name, ''), h.castle) AS castle_name,
                           h.name AS house_name, p.is_active, p.is_super_admin
                    FROM players p LEFT JOIN houses h ON h.id=p.house_id
                    WHERE p.telegram_id=$1""",
@@ -390,7 +391,8 @@ async def get_authenticated_player(request):
     async with request.app["db"].acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
+            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                   COALESCE(NULLIF(p.castle_name, ''), h.castle) AS castle_name,
                    h.name AS house_name, p.is_active, p.is_super_admin
             FROM player_sessions s
             JOIN players p ON p.id = s.player_id
@@ -446,8 +448,9 @@ async def desktop_login_status_handler(request):
         async with conn.transaction():
             row = await conn.fetchrow(
                 """SELECT r.player_id, r.session_token, p.username, p.telegram_id,
-                          p.role, p.house_id, p.castle_name, h.name AS house_name,
-                          p.is_active, p.is_super_admin
+                          p.role, p.house_id,
+                          COALESCE(NULLIF(p.castle_name, ''), h.castle) AS castle_name,
+                          h.name AS house_name, p.is_active, p.is_super_admin
                    FROM desktop_login_requests r
                    LEFT JOIN players p ON p.id=r.player_id
                    LEFT JOIN houses h ON h.id=p.house_id
@@ -783,15 +786,29 @@ async def castle_members_handler(request):
                 approved_ids,
             )
         else:
+            canonical_castle = canonical_travel_castle(castle_name)
+            castle_aliases = (
+                [canonical_castle, *TRAVEL_CASTLE_ALIASES.get(canonical_castle, [])]
+                if canonical_castle else [castle_name]
+            )
+            normalized_aliases = list({normalize_court_name(value) for value in castle_aliases})
             rows = await conn.fetch(
                 """
                 SELECT p.username, h.name AS house_name
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
-                WHERE p.is_active = TRUE AND p.castle_name = $1
+                WHERE p.is_active = TRUE
+                  AND (
+                    COALESCE(NULLIF(p.castle_name, ''), h.castle) = ANY($1::text[])
+                    OR regexp_replace(
+                        replace(replace(lower(COALESCE(NULLIF(p.castle_name, ''), h.castle)), 'ي', 'ی'), 'ك', 'ک'),
+                        '[[:space:]‌]+', '', 'g'
+                    ) = ANY($2::text[])
+                  )
                 ORDER BY p.username
                 """,
-                castle_name,
+                castle_aliases,
+                normalized_aliases,
             )
     return web.json_response({
         "ok": True,
