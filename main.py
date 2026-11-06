@@ -2593,9 +2593,21 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
     ]
     totals = {}
     upkeep = 0
+    regional_bonus = {
+        "west": {"coins": 1.5},
+        "reach": {"food": 1.5},
+        "river": {"food": 1.5},
+        "storm": {"wood": 1.5},
+        "vale": {"stone": 1.5},
+        "iron": {"iron": 1.5},
+        "north": {"wood": 1.5},
+        # Dorne's fishery is its signature food source.
+        "dorne": {"fishery": 2.0},
+    }.get(special_region, {})
     for name, key, base, food_cost in standard:
         level = _level(buildings, name)
-        totals[key] = totals.get(key, 0) + level * base * elapsed
+        multiplier = regional_bonus.get("fishery", 1.0) if name == "ماهیگیری" else regional_bonus.get(key, 1.0)
+        totals[key] = totals.get(key, 0) + int(level * base * multiplier) * elapsed
         upkeep += level * food_cost * elapsed
     special_buildings = [
         ("north", "شکارگاه", "fur", [60,105,165,240,330]),
@@ -2926,43 +2938,66 @@ async def admin_reset_economy_handler(request):
             next_version = int(row["economy_reset_version"]) + 1
             clock = await read_game_clock(conn)
             current_year = int((clock or {}).get("game_year") or 129)
-            default_resources = {
+            base_resources = {
                 "wood": 1240, "stone": 680, "iron": 45, "coins": 910,
                 "food": 120, "subjects": 38, "warhorses": 0,
-                "specialGoods": {
-                    "fur": 0, "wool": 0, "wine": 0, "spice": 0,
-                    "salt": 0, "blackIron": 0,
-                },
             }
-            house_resources = {
-                "wood": 1240, "stone": 680, "iron": 45, "coins": 910,
-                "food": 120, "subjects": 38, "warhorses": 0,
-                "fur": 0, "wool": 0, "wine": 0, "spice": 0,
-                "salt": 0, "black_iron": 0,
-            }
-            default_state = {
-                "resources": default_resources,
-                "buildings": {"مزرعه": 1, "چوب‌بری": 1, "معدن سنگ": 1, "شهر": 1},
-                "queue": [],
-                "_lastIncomeYear": current_year,
+            regional_resource = {
+                "west": ("coins", 1.5),
+                "reach": ("food", 1.5),
+                "river": ("food", 1.5),
+                "storm": ("wood", 1.5),
+                "vale": ("stone", 1.5),
+                "iron": ("iron", 1.5),
+                "north": ("wood", 1.5),
+                "dorne": ("food", 1.5),
             }
             import json
             await conn.execute(
                 "UPDATE game_state_control SET economy_reset_version = $1, updated_at = NOW() WHERE id = 1",
                 next_version,
             )
-            await conn.execute(
-                """
-                UPDATE houses
-                SET treasury = 910,
-                    food = 120,
-                    resources = $1::jsonb,
-                    game_state = $2::jsonb,
-                    game_state_updated_at = NOW()
-                """,
-                json.dumps(house_resources, ensure_ascii=False),
-                json.dumps(default_state, ensure_ascii=False),
-            )
+            houses = await conn.fetch("SELECT id, name FROM houses ORDER BY id FOR UPDATE")
+            for house in houses:
+                initial = dict(base_resources)
+                region = _house_special_region(house["name"])
+                bonus = regional_resource.get(region)
+                if bonus:
+                    key, factor = bonus
+                    initial[key] = int(initial[key] * factor)
+                default_resources = {
+                    **initial,
+                    "specialGoods": {
+                        "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                        "salt": 0, "blackIron": 0,
+                    },
+                }
+                house_resources = {
+                    **initial,
+                    "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                    "salt": 0, "black_iron": 0,
+                }
+                default_state = {
+                    "resources": default_resources,
+                    "buildings": {"مزرعه": 1, "چوب‌بری": 1, "معدن سنگ": 1, "شهر": 1},
+                    "queue": [],
+                    "_lastIncomeYear": current_year,
+                }
+                await conn.execute(
+                    """
+                    UPDATE houses
+                    SET treasury = $1,
+                        food = $2,
+                        resources = $3::jsonb,
+                        game_state = $4::jsonb,
+                        game_state_updated_at = NOW()
+                    WHERE id = $5
+                    """,
+                    initial["coins"], initial["food"],
+                    json.dumps(house_resources, ensure_ascii=False),
+                    json.dumps(default_state, ensure_ascii=False),
+                    house["id"],
+                )
     return web.json_response({
         "ok": True,
         "economy_reset_version": next_version,
