@@ -885,6 +885,8 @@ def can_manage_court(player, castle_name):
     except (TypeError, ValueError):
         telegram_id = 0
     castle = normalize_court_name(castle_name)
+    # Royal realm appointments are reserved for the reigning monarch:
+    # Aegon at King's Landing and Rhaenyra at Dragonstone.
     if castle in (normalize_court_name("کینگزلندینگ"), normalize_court_name("King's Landing")):
         return telegram_id == 6523502457
     if castle in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
@@ -1253,7 +1255,7 @@ async def character_travel_handler(request):
     async with request.app["db"].acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT character_name, home_castle, current_castle, updated_at
+            SELECT character_name, home_castle, current_castle, travel_type, updated_at
             FROM character_travels
             WHERE current_castle = $1 AND home_castle <> current_castle
             ORDER BY character_name
@@ -1262,36 +1264,31 @@ async def character_travel_handler(request):
         )
         away_rows = await conn.fetch(
             """
-            SELECT character_name, home_castle, current_castle, updated_at
+            SELECT character_name, home_castle, current_castle, travel_type, updated_at
             FROM character_travels
             WHERE home_castle = $1 AND current_castle <> home_castle
             ORDER BY character_name
             """,
             castle,
         )
+    def travel_item(row):
+        return {
+            "character_name": row["character_name"],
+            "home_castle": row["home_castle"],
+            "current_castle": row["current_castle"],
+            "travel_type": row["travel_type"] or "temporary",
+            "court_member": (row["travel_type"] or "temporary") == "permanent",
+            "updated_at": row["updated_at"].isoformat(),
+        }
+    arrivals = [travel_item(row) for row in rows]
     return web.json_response({
         "ok": True,
         "castle_name": castle,
         "can_travel": can_travel,
         "destinations": list(TRAVEL_CASTLE_ALIASES.keys()),
-        "guests": [
-            {
-                "character_name": row["character_name"],
-                "home_castle": row["home_castle"],
-                "current_castle": row["current_castle"],
-                "updated_at": row["updated_at"].isoformat(),
-            }
-            for row in rows
-        ],
-        "away": [
-            {
-                "character_name": row["character_name"],
-                "home_castle": row["home_castle"],
-                "current_castle": row["current_castle"],
-                "updated_at": row["updated_at"].isoformat(),
-            }
-            for row in away_rows
-        ],
+        "court_members": [item for item in arrivals if item["court_member"]],
+        "guests": [item for item in arrivals if not item["court_member"]],
+        "away": [travel_item(row) for row in away_rows],
     })
 
 
@@ -1306,6 +1303,9 @@ async def character_travel_update_handler(request):
     character_name = str(data.get("character_name") or "").strip()
     home_castle = canonical_travel_castle(data.get("home_castle"))
     destination = canonical_travel_castle(data.get("destination_castle"))
+    travel_type = str(data.get("travel_type") or "temporary").strip().lower()
+    if travel_type not in ("temporary", "permanent"):
+        return json_error("invalid_travel_type")
     player_castle = canonical_travel_castle(player.get("castle_name"))
     if not character_name or len(character_name) > 150 or not home_castle or not destination:
         return json_error("invalid_travel")
@@ -1325,15 +1325,16 @@ async def character_travel_update_handler(request):
             row = await conn.fetchrow(
                 """
                 INSERT INTO character_travels
-                    (character_name, home_castle, current_castle, last_travel_by, updated_at)
-                VALUES ($1, $2, $3, $4, NOW())
+                    (character_name, home_castle, current_castle, travel_type, last_travel_by, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
                 ON CONFLICT (character_name, home_castle)
                 DO UPDATE SET current_castle = EXCLUDED.current_castle,
+                              travel_type = EXCLUDED.travel_type,
                               last_travel_by = EXCLUDED.last_travel_by,
                               updated_at = NOW()
                 RETURNING updated_at
                 """,
-                character_name, home_castle, destination, player["id"],
+                character_name, home_castle, destination, travel_type, player["id"],
             )
             updated_at = row["updated_at"].isoformat()
     return web.json_response({
@@ -1341,6 +1342,8 @@ async def character_travel_update_handler(request):
         "character_name": character_name,
         "home_castle": home_castle,
         "current_castle": destination,
+        "travel_type": travel_type if destination != home_castle else None,
+        "court_member": destination != home_castle and travel_type == "permanent",
         "returned_home": destination == home_castle,
         "updated_at": updated_at,
     })
@@ -3653,11 +3656,14 @@ async def on_startup(app):
                 character_name VARCHAR(150) NOT NULL,
                 home_castle VARCHAR(150) NOT NULL,
                 current_castle VARCHAR(150) NOT NULL,
+                travel_type VARCHAR(20) NOT NULL DEFAULT 'temporary'
+                    CHECK (travel_type IN ('temporary', 'permanent')),
                 last_travel_by BIGINT REFERENCES players(id),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (character_name, home_castle)
             )
         """)
+        await conn.execute("ALTER TABLE character_travels ADD COLUMN IF NOT EXISTS travel_type VARCHAR(20) NOT NULL DEFAULT 'temporary'")
         await conn.execute("CREATE INDEX IF NOT EXISTS character_travels_current_idx ON character_travels (current_castle, updated_at DESC)")
     try:
         await bot.set_chat_menu_button(
