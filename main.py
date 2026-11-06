@@ -2656,6 +2656,47 @@ def _canonical_house_resources(house_resources, game_resources):
     return result
 
 
+async def _settle_all_house_annual_income(conn, game_year):
+    import json
+    rows = await conn.fetch(
+        "SELECT id, name, game_state, resources FROM houses ORDER BY id FOR UPDATE"
+    )
+    settled = 0
+    for row in rows:
+        state = _json_object(row["game_state"])
+        house_resources = _json_object(row["resources"])
+        state["resources"] = _canonical_house_resources(house_resources, state.get("resources"))
+        last_year = int(state.get("_lastIncomeYear", 129) or 129)
+        elapsed = max(0, int(game_year) - last_year)
+        if not elapsed:
+            continue
+        state = _apply_house_annual_income(
+            state, elapsed, _house_special_region(row["name"])
+        )
+        state["_lastIncomeYear"] = int(game_year)
+        resources = state.get("resources") or {}
+        special = resources.get("specialGoods") or {}
+        for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+            if key in resources:
+                house_resources[key] = resources[key]
+        for key, source in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                            ("spice", "spice"), ("salt", "salt"), ("black_iron", "blackIron")):
+            if source in special:
+                house_resources[key] = special[source]
+        await conn.execute(
+            """
+            UPDATE houses
+            SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW()
+            WHERE id=$3
+            """,
+            json.dumps(state, ensure_ascii=False),
+            json.dumps(house_resources, ensure_ascii=False),
+            row["id"],
+        )
+        settled += 1
+    return settled
+
+
 async def my_house_state_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
@@ -2679,9 +2720,10 @@ async def my_house_state_handler(request):
                 )
             clock = await read_game_clock(conn)
             changed = False
-            if clock and clock.get("is_running"):
-                import time
-                changed = _settle_house_build_queue(state, time.time() * 1000) or changed
+            if clock:
+                if clock.get("is_running"):
+                    import time
+                    changed = _settle_house_build_queue(state, time.time() * 1000) or changed
                 year = int(clock["game_year"])
                 last_year = int(state.get("_lastIncomeYear", 129) or 129)
                 elapsed = max(0, year - last_year)
@@ -2769,7 +2811,10 @@ async def game_clock_handler(request):
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
-        clock = await read_game_clock(conn)
+        async with conn.transaction():
+            clock = await read_game_clock(conn)
+            if clock:
+                await _settle_all_house_annual_income(conn, int(clock["game_year"]))
     if not clock:
         return json_error("game_clock_unavailable", 503)
     return web.json_response({"ok": True, **clock})
