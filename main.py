@@ -496,7 +496,8 @@ async def auth_handler(request):
     async with request.app["db"].acquire() as conn:
         player = await conn.fetchrow(
             """
-            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id, p.castle_name,
+            SELECT p.id, p.username, p.telegram_id, p.role, p.house_id,
+                   COALESCE(NULLIF(p.castle_name, ''), h.castle) AS castle_name,
                    h.name AS house_name, p.is_active, p.is_super_admin
             FROM players p
             LEFT JOIN houses h ON h.id = p.house_id
@@ -799,9 +800,14 @@ async def castle_members_handler(request):
                 LEFT JOIN houses h ON h.id = p.house_id
                 WHERE p.is_active = TRUE
                   AND (
-                    COALESCE(NULLIF(p.castle_name, ''), h.castle) = ANY($1::text[])
+                    p.castle_name = ANY($1::text[])
+                    OR h.castle = ANY($1::text[])
                     OR regexp_replace(
-                        replace(replace(lower(COALESCE(NULLIF(p.castle_name, ''), h.castle)), 'ي', 'ی'), 'ك', 'ک'),
+                        replace(replace(lower(COALESCE(p.castle_name, '')), 'ي', 'ی'), 'ك', 'ک'),
+                        '[[:space:]‌]+', '', 'g'
+                    ) = ANY($2::text[])
+                    OR regexp_replace(
+                        replace(replace(lower(COALESCE(h.castle, '')), 'ي', 'ی'), 'ك', 'ک'),
                         '[[:space:]‌]+', '', 'g'
                     ) = ANY($2::text[])
                   )
