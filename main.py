@@ -1276,6 +1276,7 @@ async def character_travel_handler(request):
             "character_name": row["character_name"],
             "home_castle": row["home_castle"],
             "current_castle": row["current_castle"],
+            "destination_castle": row["current_castle"],
             "travel_type": row["travel_type"] or "temporary",
             "court_member": (row["travel_type"] or "temporary") == "permanent",
             "updated_at": row["updated_at"].isoformat(),
