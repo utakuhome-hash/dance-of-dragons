@@ -19,7 +19,11 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-WEBHOOK_BASE_URL = os.environ["WEBHOOK_BASE_URL"].rstrip("/")
+WEBHOOK_BASE_URL = os.environ["WEBHOOK_BASE_URL"].strip().rstrip("/")
+if WEBHOOK_BASE_URL.startswith("http://"):
+    WEBHOOK_BASE_URL = "https://" + WEBHOOK_BASE_URL[len("http://"): ]
+elif not WEBHOOK_BASE_URL.startswith("https://"):
+    WEBHOOK_BASE_URL = "https://" + WEBHOOK_BASE_URL
 WEBHOOK_PATH = "/telegram-webhook"
 WEBHOOK_URL = f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
 WEB_SERVER_PORT = int(os.getenv("PORT", "10000"))
