@@ -2516,13 +2516,19 @@ def _json_object(value):
 
 def _level(buildings, name):
     def norm(v):
-        return str(v or "").replace("\u200c", "").replace(" ", "").replace("ي", "ی").replace("ك", "ک")
+        value = str(v or "").replace("\u200c", "").replace(" ", "").replace("ي", "ی").replace("ك", "ک")
+        if value in ("پرورشاسبجنگی", "پرورشگاهاسبجنگی"):
+            return "پرورشگاهاسبجنگی"
+        return value
     target = norm(name)
+    levels = []
     for key, value in buildings.items():
         if norm(key) == target:
-            try: return max(0, min(5, int(value)))
-            except (ValueError, TypeError): return 0
-    return 0
+            try:
+                levels.append(max(0, min(5, int(value))))
+            except (ValueError, TypeError):
+                continue
+    return max(levels, default=0)
 
 
 def _house_special_region(house_name):
@@ -2605,7 +2611,11 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
             continue
         level = _level(buildings, name)
         if level:
-            special[key] = int(special.get(key, 0) or 0) + yields[level-1] * elapsed
+            amount = yields[level-1] * elapsed
+            if key == "warhorses":
+                resources["warhorses"] = int(resources.get("warhorses", 0) or 0) + amount
+            else:
+                special[key] = int(special.get(key, 0) or 0) + amount
     for key, amount in totals.items():
         resources[key] = int(resources.get(key, 0) or 0) + amount
     resources["food"] = max(0, int(resources.get("food", 0) or 0) - upkeep)
@@ -2625,10 +2635,18 @@ def _canonical_house_resources(house_resources, game_resources):
     for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
         if key in house_resources:
             result[key] = house_resources[key]
+    # Older versions stored warhorse-building output under specialGoods.
+    # Fold that legacy stock into the canonical warehouse field.
+    legacy_special = game_resources.get("specialGoods") or {}
+    try:
+        legacy_warhorses = max(0, int(legacy_special.get("warhorses", 0) or 0))
+        result["warhorses"] = int(result.get("warhorses", 0) or 0) + legacy_warhorses
+    except (TypeError, ValueError):
+        pass
     special = {
         "fur": 0, "wool": 0, "wine": 0, "spice": 0, "salt": 0, "blackIron": 0,
     }
-    special.update(game_resources.get("specialGoods") or {})
+    special.update({k: v for k, v in legacy_special.items() if k != "warhorses"})
     for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
                            ("spice", "spice"), ("salt", "salt"),
                            ("black_iron", "blackIron"), ("blackIron", "blackIron")):
@@ -2721,7 +2739,7 @@ async def my_house_state_update_handler(request):
             if not row: return json_error("house_not_found", 404)
             expected_updated_at = data.get("expected_updated_at")
             current_updated_at = row["game_state_updated_at"]
-            if current_updated_at and (not expected_updated_at or expected_updated_at != current_updated_at.isoformat()):
+            if not current_updated_at or not expected_updated_at or expected_updated_at != current_updated_at.isoformat():
                 return json_error("stale_house_state", 409)
             current = _json_object(row["game_state"])
             current.update(incoming)
