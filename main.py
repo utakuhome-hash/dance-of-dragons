@@ -3152,21 +3152,21 @@ async def on_startup(app):
         # Keep the existing Karhold member's display name in sync.
         await conn.execute(
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
-            "Assis Karstark", "8772075836",
+            "Assis Karstark", 8772075836,
         )
         await conn.execute(
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
-            "Roderick Dustin", "6008315341",
+            "Roderick Dustin", 6008315341,
         )
         await conn.execute(
             "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
-            "Karent Crakehall", "7066209583",
+            "Karent Crakehall", 7066209583,
         )
         for display_name, member_id in (
-            ("Jason Lannister", "7355922500"),
-            ("Tyland Lannister", "7865635509"),
-            ("Loren Lannister", "7379737762"),
-            ("Johanna Lannister", "1606528421"),
+            ("Jason Lannister", 7355922500),
+            ("Tyland Lannister", 7865635509),
+            ("Loren Lannister", 7379737762),
+            ("Johanna Lannister", 1606528421),
         ):
             await conn.execute(
                 "UPDATE players SET username = $1 WHERE telegram_id = $2::bigint",
