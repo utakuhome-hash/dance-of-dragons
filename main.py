@@ -2617,11 +2617,18 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
 def _canonical_house_resources(house_resources, game_resources):
     house_resources = house_resources if isinstance(house_resources, dict) else {}
     game_resources = game_resources if isinstance(game_resources, dict) else {}
-    result = dict(game_resources)
+    result = {
+        "wood": 0, "stone": 0, "iron": 0, "coins": 0,
+        "food": 0, "subjects": 0, "warhorses": 0,
+    }
+    result.update(game_resources)
     for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
         if key in house_resources:
             result[key] = house_resources[key]
-    special = dict(game_resources.get("specialGoods") or {})
+    special = {
+        "fur": 0, "wool": 0, "wine": 0, "spice": 0, "salt": 0, "blackIron": 0,
+    }
+    special.update(game_resources.get("specialGoods") or {})
     for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
                            ("spice", "spice"), ("salt", "salt"),
                            ("black_iron", "blackIron"), ("blackIron", "blackIron")):
