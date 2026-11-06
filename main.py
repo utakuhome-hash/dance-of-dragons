@@ -878,19 +878,19 @@ def player_court_castle(player):
 def can_manage_court(player, castle_name):
     if not player or not player.get("is_active"):
         return False
-    if player.get("is_super_admin"):
-        return True
     try:
         telegram_id = int(player.get("telegram_id") or 0)
     except (TypeError, ValueError):
         telegram_id = 0
     castle = normalize_court_name(castle_name)
-    # Royal realm appointments are reserved for the reigning monarch:
-    # Aegon at King's Landing and Rhaenyra at Dragonstone.
+    # Royal appointments are strictly reserved for Aegon and Rhaenyra,
+    # including when another account has global administrator privileges.
     if castle in (normalize_court_name("کینگزلندینگ"), normalize_court_name("King's Landing")):
         return telegram_id == 6523502457
     if castle in (normalize_court_name("دراگون‌استون"), normalize_court_name("Dragonstone")):
         return telegram_id == 5632444639
+    if player.get("is_super_admin"):
+        return True
     if castle in (normalize_court_name("دریفت‌مارک"), normalize_court_name("Driftmark")):
         return telegram_id == 7650983591
     if castle in (
