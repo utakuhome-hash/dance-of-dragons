@@ -2683,7 +2683,7 @@ async def my_house_state_handler(request):
                 import time
                 changed = _settle_house_build_queue(state, time.time() * 1000) or changed
                 year = int(clock["game_year"])
-                last_year = int(state.get("_lastIncomeYear", year) or year)
+                last_year = int(state.get("_lastIncomeYear", 129) or 129)
                 elapsed = max(0, year - last_year)
                 if elapsed:
                     state = _apply_house_annual_income(
@@ -2879,15 +2879,51 @@ async def admin_reset_economy_handler(request):
             if not row:
                 return json_error("game_state_control_unavailable", 503)
             next_version = int(row["economy_reset_version"]) + 1
+            clock = await read_game_clock(conn)
+            current_year = int((clock or {}).get("game_year") or 129)
+            default_resources = {
+                "wood": 1240, "stone": 680, "iron": 45, "coins": 910,
+                "food": 120, "subjects": 38, "warhorses": 0,
+                "specialGoods": {
+                    "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                    "salt": 0, "blackIron": 0,
+                },
+            }
+            house_resources = {
+                "wood": 1240, "stone": 680, "iron": 45, "coins": 910,
+                "food": 120, "subjects": 38, "warhorses": 0,
+                "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                "salt": 0, "black_iron": 0,
+            }
+            default_state = {
+                "resources": default_resources,
+                "buildings": {"مزرعه": 1, "چوب‌بری": 1, "معدن سنگ": 1, "شهر": 1},
+                "queue": [],
+                "_lastIncomeYear": current_year,
+            }
+            import json
             await conn.execute(
                 "UPDATE game_state_control SET economy_reset_version = $1, updated_at = NOW() WHERE id = 1",
                 next_version,
             )
-            await conn.execute("UPDATE houses SET game_state='{}'::jsonb, game_state_updated_at=NULL")
+            await conn.execute(
+                """
+                UPDATE houses
+                SET treasury = 910,
+                    food = 120,
+                    resources = $1::jsonb,
+                    game_state = $2::jsonb,
+                    game_state_updated_at = NOW()
+                """,
+                json.dumps(house_resources, ensure_ascii=False),
+                json.dumps(default_state, ensure_ascii=False),
+            )
     return web.json_response({
         "ok": True,
         "economy_reset_version": next_version,
-        "message": "player_resources_and_buildings_reset_requested",
+        "game_year": current_year,
+        "houses_reset": True,
+        "message": "player_resources_and_buildings_reset",
     })
 
 
