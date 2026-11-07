@@ -3872,7 +3872,7 @@ async def on_startup(app):
             'hugh hammer','corlys velaryon','adam velaryon','addam velaryon',
             'alyn velaryon','bartimos celtigar','lord reynald darklyn','ynald darklyn',
             'criston cole','arryk cargyll','erryk cargyll','ser luthor largent',
-            'lorent marbrand','willam royce','steffon darklyn',
+            'lorent marbrand','ser lorent marbrand','willam royce','ser willam royce','steffon darklyn','ser steffon darklyn',
             'otto hightower','gwayne hightower','orwyle','tyland lannister',
             'jasper wylde','borros baratheon','cregan stark','jacaerys velaryon',
             'robert arryn','gerold royce','harrold westerling',
@@ -3881,7 +3881,7 @@ async def on_startup(app):
             'lorent marbrand','garmund hightower','hobert hightower',
             'lord beesbury','lyman beesbury','jason lannister',
             'tyland lannister','addam of hull','qarlo',
-            'ormund hightower','jon roxton','gwayne hightower',
+            'ormund hightower','jon roxton','ser jon roxton','gwayne hightower','ser gwayne hightower',
             'kermit tully','amos bracken','forrest frey','cregan stark',
             'rickon stark','benjen stark','harmond umber','roderick dustin',
             'loreon lannister','clarrent crakehall','humphrey lefford',
@@ -3890,7 +3890,7 @@ async def on_startup(app):
             'willis fell','arnold arryn','joffrey arryn','yorbert royce',
             'leowyn corbray','qoren martell','anders yronwood',
             'franklyn fowler','edric dayne','dalton greyjoy','veron greyjoy',
-            'harras harlaw','lorren blacktyde','gorold goodbrother'
+            'harras harlaw','ser harras harlaw','lorren blacktyde','gorold goodbrother'
         ])
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS marriage_proposals (
