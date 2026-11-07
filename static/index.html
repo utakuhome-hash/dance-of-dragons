@@ -66,6 +66,10 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
  <label for="adminHouseEconomySelect">انتخاب خاندان</label>
  <select id="adminHouseEconomySelect" style="width:100%;padding:10px;border-radius:8px;background:#100e0c;color:#fff;border:1px solid #78603c"><option value="">انتخاب خاندان…</option></select>
  <div id="adminHouseEconomyEditor" style="margin-top:12px"></div>
+ <hr><h3>⚔️ اعلام نتیجه لشکرکشی‌ها</h3>
+ <p style="font-size:12px;color:#c9bda7;line-height:1.8">برای هر سپاه اعزام‌شده، برنده و تلفات دو طرف را ثبت کن. ثبت نتیجه فقط برای سوپرادمین فعال است؛ ثبت دوباره، نتیجه قبلی را ویرایش می‌کند.</p>
+ <button type="button" id="refreshMilitaryResults">به‌روزرسانی لشکرکشی‌ها</button>
+ <div id="adminMilitaryCampaigns">در حال دریافت…</div>
  <hr><h3>ورودهای در انتظار بررسی</h3>
  <p style="font-size:12px;color:#c9bda7;line-height:1.8">اگر بازیکن ثبت‌شده با شناسهٔ اشتباه وارد شود، درخواستش اینجا می‌آید. فقط با انتخاب شخصیت درست، شناسه به آن حساب متصل می‌شود؛ افراد تأییدنشده خودکار وارد نمی‌شوند.</p>
  <button type="button" id="refreshLoginRequests">به‌روزرسانی درخواست‌ها</button>
@@ -319,7 +323,7 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   finally{btn.disabled=false;}
  }
  async function loadCharacterOptions(){const select=document.getElementById('newCharacterProfile');select.replaceChildren(new Option('در حال دریافت فهرست شخصیت‌ها…',''));try{const d=await api('/api/profiles/public');select.replaceChildren(new Option('یک شخصیت را انتخاب کن',''));(d.profiles||[]).forEach(p=>select.add(new Option(p.character_name+(p.house?' · خاندان '+p.house:'')+(p.title?' · '+p.title:''),String(p.id))));if(!d.profiles?.length)select.replaceChildren(new Option('شخصیتی ثبت نشده است',''));}catch(e){select.replaceChildren(new Option('دریافت فهرست ناموفق بود: '+e.message,''));}}
- async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadDeviceGroups(),loadGameClockAdmin(),loadCharacterOptions()]);}
+ async function adminOpen(){document.getElementById('adminPanel').hidden=false;await Promise.all([loadPlayers(),loadLoginRequests(),loadDeviceGroups(),loadGameClockAdmin(),loadCharacterOptions(),loadMilitaryCampaigns()]);}
  async function loadGameClockAdmin(){
   const status=document.getElementById('gameClockAdminStatus'),start=document.getElementById('gameClockStart'),pause=document.getElementById('gameClockPause');
   try{const d=await api('/api/game-clock');status.textContent=(d.is_running?'ساعت فعال است':'ساعت متوقف است')+' · '+d.season_label+' · سال '+Number(d.game_year).toLocaleString('fa-IR')+' AC';start.disabled=!!d.is_running;pause.disabled=!d.is_running;}
@@ -368,6 +372,46 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
  }
  document.getElementById('resetEconomyState').addEventListener('click',resetEconomyState);
 
+
+ async function loadMilitaryCampaigns(){
+  const list=document.getElementById('adminMilitaryCampaigns');if(!list)return;
+  list.textContent='در حال دریافت لشکرکشی‌ها…';
+  try{
+   const data=await api('/api/admin/military/campaigns');list.replaceChildren();
+   if(!data.campaigns?.length){list.textContent='هنوز لشکرکشی‌ای ثبت نشده است.';return;}
+   data.campaigns.forEach(c=>{
+    const card=document.createElement('div');card.style.cssText='border:1px solid #80643c;border-radius:10px;padding:10px;margin:9px 0;background:#17140f';
+    const title=document.createElement('strong');title.textContent='#'+c.id+' · '+(c.sender_house_name||c.sender_name)+' · '+(c.target||'مقصد نامشخص');
+    const meta=document.createElement('small');meta.style.cssText='display:block;color:#c9bda7;line-height:1.9;margin:5px 0';
+    meta.textContent='فرمانده: '+c.commander_name+' · '+Number(c.troop_count||0).toLocaleString('fa-IR')+' نیرو · مأموریت: '+c.mission+' · وضعیت: '+c.status;
+    card.append(title,meta);
+    if(!['dispatched','completed'].includes(c.status)){
+     const wait=document.createElement('small');wait.textContent='تا اعزام کامل سپاه، امکان ثبت نتیجه وجود ندارد.';wait.style.color='#d9b978';card.append(wait);list.append(card);return;
+    }
+    const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px';
+    const winner=document.createElement('select');winner.style.cssText='grid-column:1/-1;padding:9px;border-radius:7px;background:#100e0c;color:#fff;border:1px solid #78603c';
+    [['attacker','پیروزی مهاجم'],['defender','پیروزی مدافع'],['draw','بدون برنده / تساوی']].forEach(([v,l])=>winner.add(new Option(l,v)));
+    const attacker=document.createElement('input');attacker.type='number';attacker.min='0';attacker.max=String(c.troop_count);attacker.step='1';attacker.placeholder='تلفات مهاجم';attacker.value=String(c.attacker_losses||0);
+    const defender=document.createElement('input');defender.type='number';defender.min='0';defender.max='100000000';defender.step='1';defender.placeholder='تلفات مدافع';defender.value=String(c.defender_losses||0);
+    const note=document.createElement('textarea');note.placeholder='یادداشت نتیجه (اختیاری)';note.maxLength=1000;note.value=c.result_note||'';note.style.cssText='grid-column:1/-1;min-height:60px;padding:9px;border-radius:7px;background:#100e0c;color:#fff;border:1px solid #78603c;font:12px Tahoma';
+    if(c.winner)winner.value=c.winner;
+    grid.append(winner,attacker,defender,note);
+    const save=document.createElement('button');save.type='button';save.textContent=c.winner?'ویرایش نتیجه جنگ':'ثبت نتیجه جنگ';save.style.cssText='width:100%;margin-top:9px;padding:10px;border-radius:8px;background:#49321b;color:#fff0c8;border:1px solid #d5ae62';
+    const status=document.createElement('small');status.style.cssText='display:block;margin-top:7px;color:#c9bda7;line-height:1.8';
+    save.onclick=async()=>{
+     const al=Number(attacker.value),dl=Number(defender.value);
+     if(!Number.isSafeInteger(al)||!Number.isSafeInteger(dl)||al<0||dl<0||al>Number(c.troop_count)||dl>100000000){status.textContent='تلفات باید عدد صحیح و معتبر باشد؛ تلفات مهاجم از تعداد سپاه بیشتر نشود.';return;}
+     if(!confirm('نتیجه این لشکرکشی ثبت شود؟ در صورت وجود نتیجه قبلی، جایگزین خواهد شد.'))return;
+     save.disabled=true;status.textContent='در حال ثبت نتیجه…';
+     try{await api('/api/admin/military/campaigns/'+c.id+'/result',{method:'POST',body:JSON.stringify({winner:winner.value,attacker_losses:al,defender_losses:dl,note:note.value})});status.textContent='نتیجه ثبت شد و لشکرکشی پایان‌یافته شد.';await loadMilitaryCampaigns();}
+     catch(e){status.textContent='ثبت نتیجه ناموفق بود: '+e.message;save.disabled=false;}
+    };
+    if(c.winner){const previous=document.createElement('small');previous.style.cssText='display:block;color:#9fc9a6;margin:5px 0';previous.textContent='نتیجه فعلی: '+({attacker:'پیروزی مهاجم',defender:'پیروزی مدافع',draw:'تساوی'}[c.winner])+' · تلفات مهاجم '+Number(c.attacker_losses||0)+' · تلفات مدافع '+Number(c.defender_losses||0);card.append(previous);}
+    card.append(grid,save,status);list.append(card);
+   });
+  }catch(e){list.textContent='دریافت لشکرکشی‌ها ناموفق بود: '+e.message;}
+ }
+ document.getElementById('refreshMilitaryResults')?.addEventListener('click',loadMilitaryCampaigns);
 
  const houseResourceFields=[['wood','چوب'],['stone','سنگ'],['iron','آهن'],['coins','سکه'],['food','غذا'],['subjects','رعیت'],['warhorses','اسب جنگی'],['fur','خز'],['wool','پشم'],['wine','شراب'],['spice','ادویه'],['black_iron','آهن سیاه'],['salt','نمک']];
  function renderHouseEconomy(houses){
