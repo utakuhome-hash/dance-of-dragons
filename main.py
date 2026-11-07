@@ -275,7 +275,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107j")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107k")
         )]
     ])
     return keyboard
@@ -3543,7 +3543,7 @@ async def mail_send_handler(request):
         notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
                 text="📬 مشاهده نامه‌ها",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107j"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107k"),
             )
         ]])
         try:
@@ -5063,7 +5063,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107j"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107k"),
             )
         )
     except Exception:
