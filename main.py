@@ -3637,7 +3637,7 @@ async def marriage_asset_handler(request):
 async def index_handler(request):
     # Inject the marriage entry point without rewriting the large existing game shell.
     html = WEBAPP_FILE.read_text(encoding="utf-8")
-    script_tag = '<script src="/marriage.js?v=1" defer></script>'
+    script_tag = '<script src="/marriage.js?v=2" defer></script>'
     if script_tag not in html:
         if "</body>" in html:
             html = html.replace("</body>", script_tag + "</body>", 1)
