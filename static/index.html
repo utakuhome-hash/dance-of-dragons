@@ -763,8 +763,12 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   list.textContent='در حال دریافت همهٔ نامه‌ها…';
   const button=document.getElementById('refreshAdminMail');if(button)button.disabled=true;
   try{
-   const data=await api('/api/admin/mail?limit=300');
-   adminMailCache=Array.isArray(data.letters)?data.letters:[];
+   const first=await api('/api/admin/mail?limit=200&page=1');
+   adminMailCache=Array.isArray(first.letters)?first.letters:[];
+   for(let page=2;page<=Number(first.pages||1);page++){
+    const next=await api('/api/admin/mail?limit=200&page='+page);
+    if(Array.isArray(next.letters))adminMailCache.push(...next.letters);
+   }
    renderAdminMail();
   }catch(e){list.textContent='دریافت نامه‌ها ناموفق بود: '+e.message;}
   finally{if(button)button.disabled=false;}
