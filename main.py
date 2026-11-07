@@ -3214,7 +3214,7 @@ async def twins_policy_handler(request):
                   "blocked_house_ids":sorted(blocked),
                   "blocked_house_names":[h["name"] for h in houses if int(h["id"]) in blocked],
                   "queue_rule":policy["queue_rule"] if policy else "wait"},
-        "houses":[dict(h) for h in houses],"caravans":items})
+        "houses":[dict(h) for h in houses],"my_house_id":player.get("house_id"),"caravans":items})
 
 async def twins_policy_update_handler(request):
     player=await get_authenticated_player(request)
