@@ -1447,20 +1447,12 @@ async def marriage_handler(request):
             WHERE m.groom_player_id=$1 OR m.bride_player_id=$1
             ORDER BY wg.created_at DESC LIMIT 200
         """, player["id"])
-        marriage_ids=[int(row["id"]) for row in marriages]
-        guests = await conn.fetch("""
-            SELECT wi.id AS invitation_id, wi.marriage_id, wi.response,
-                   p.id AS player_id, p.username AS player_name
-            FROM wedding_invitations wi
-            JOIN players p ON p.id=wi.invited_player_id
-            WHERE wi.marriage_id=ANY($1::bigint[])
-            ORDER BY wi.created_at, p.username
-        """, marriage_ids)
         invitations = await conn.fetch("""
             SELECT wi.id, wi.response, wi.created_at, m.id AS marriage_id,
                    gp.character_name AS groom_name, bp.character_name AS bride_name,
-                   m.ceremony_level, m.ceremony_at, g.username AS groom_player_name,
-                   b.username AS bride_player_name
+                   m.ceremony_level, m.ceremony_at, m.scheduled_at,
+                   m.duration_minutes, m.ceremony_status,
+                   g.username AS groom_player_name, b.username AS bride_player_name
             FROM wedding_invitations wi
             JOIN marriages m ON m.id=wi.marriage_id
             JOIN character_profiles gp ON gp.id=m.groom_profile_id
@@ -1470,6 +1462,15 @@ async def marriage_handler(request):
             WHERE wi.invited_player_id=$1
             ORDER BY wi.created_at DESC LIMIT 100
         """, player["id"])
+        marriage_ids=list({int(row["id"]) for row in marriages} | {int(row["marriage_id"]) for row in invitations})
+        guests = await conn.fetch("""
+            SELECT wi.id AS invitation_id, wi.marriage_id, wi.response,
+                   p.id AS player_id, p.username AS player_name
+            FROM wedding_invitations wi
+            JOIN players p ON p.id=wi.invited_player_id
+            WHERE wi.marriage_id=ANY($1::bigint[])
+            ORDER BY wi.created_at, p.username
+        """, marriage_ids)
     def iso(row, key):
         value=row[key]
         return value.isoformat() if value else None
@@ -1484,7 +1485,7 @@ async def marriage_handler(request):
         "incoming":[clean(r,("created_at",)) for r in inbox],
         "outgoing":[clean(r,("created_at",)) for r in outbox],
         "marriages":[clean(r,("created_at","ceremony_at","scheduled_at","started_at","completed_at","satisfaction_expires_at")) for r in marriages],
-        "invitations":[clean(r,("created_at","ceremony_at")) for r in invitations],
+        "invitations":[clean(r,("created_at","ceremony_at","scheduled_at")) for r in invitations],
         "guests":[dict(r) for r in guests],
         "gifts":[clean(r,("created_at",)) for r in gifts],
         "ceremonies": MARRIAGE_CEREMONIES,
@@ -4331,8 +4332,8 @@ async def wedding_scheduler_loop(app):
                         SELECT * FROM marriages
                         WHERE ceremony_status='scheduled' AND scheduled_at<=NOW()
                         ORDER BY scheduled_at
-                        FOR UPDATE SKIP LOCKED
                         LIMIT 20
+                        FOR UPDATE SKIP LOCKED
                     """)
                     import json
                     for marriage in due:
@@ -4384,8 +4385,6 @@ async def start_wedding_scheduler(app):
 
 async def on_cleanup(app):
     global db_pool
-    if app.get("db"):
-        await app["db"].close()
     task=app.get("wedding_scheduler_task")
     if task:
         task.cancel()
@@ -4393,6 +4392,8 @@ async def on_cleanup(app):
             await task
         except asyncio.CancelledError:
             pass
+    if app.get("db"):
+        await app["db"].close()
     db_pool = None
     await bot.session.close()
 
