@@ -137,6 +137,39 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
 .nav button.active .nav-icon{transform:translateY(-2px) scale(1.06);filter:drop-shadow(0 0 5px #f0d18c99)}
 .nav button:active .nav-icon{transform:scale(.94)}
 @media(max-width:380px){.nav button .nav-icon{width:38px;height:38px;flex-basis:38px}}
+
+/* iPhone/iOS: show the complete game navigation without horizontal scrolling */
+@media (max-width:600px){
+  .shell{min-height:100vh;min-height:100dvh;padding-bottom:calc(120px + var(--safe-bottom))!important;overflow:visible}
+  .mast{height:auto!important;min-height:66px;flex-wrap:wrap;padding-top:calc(9px + env(safe-area-inset-top,0px))}
+  .nav{
+    position:fixed!important;left:0!important;right:0!important;bottom:0!important;
+    transform:none!important;width:100%!important;max-width:560px!important;margin:0 auto!important;
+    display:grid!important;grid-template-columns:repeat(7,minmax(0,1fr))!important;
+    grid-auto-rows:52px;gap:4px!important;justify-content:stretch!important;align-items:stretch!important;
+    height:auto!important;max-height:none!important;overflow:hidden!important;
+    padding:5px 5px calc(5px + var(--safe-bottom))!important;
+    touch-action:auto!important;-webkit-overflow-scrolling:auto!important;
+  }
+  .nav button,.nav button[data-page="dashboard"],.nav button[data-page="warehouse"],.nav button.warehouse-fixed{
+    position:relative!important;inset:auto!important;transform:none!important;
+    display:flex!important;visibility:visible!important;opacity:1!important;
+    width:auto!important;min-width:0!important;max-width:none!important;flex:none!important;
+    height:52px!important;min-height:52px!important;align-self:stretch!important;
+    padding:3px 1px!important;gap:2px!important;border-radius:10px!important;
+  }
+  .nav button .nav-icon{width:25px!important;height:25px!important;flex:0 0 25px!important}
+  .nav button span,.nav button span:not(.nav-emoji){display:block!important;max-width:100%!important;font:600 8px/1.2 Tahoma,Arial,sans-serif!important;white-space:nowrap!important}
+  .frame{height:calc(100vh - 66px - 120px - var(--safe-bottom));height:calc(100dvh - 66px - 120px - var(--safe-bottom));min-height:420px}
+}
+@media (max-width:380px){
+  .nav{grid-auto-rows:49px;gap:3px!important;padding-left:4px!important;padding-right:4px!important}
+  .nav button,.nav button[data-page="dashboard"],.nav button[data-page="warehouse"],.nav button.warehouse-fixed{height:49px!important;min-height:49px!important}
+  .nav button .nav-icon{width:22px!important;height:22px!important;flex-basis:22px!important}
+  .nav button span,.nav button span:not(.nav-emoji){font-size:7px!important}
+  .shell{padding-bottom:calc(114px + var(--safe-bottom))!important}
+  .frame{height:calc(100vh - 66px - 114px - var(--safe-bottom));height:calc(100dvh - 66px - 114px - var(--safe-bottom))}
+}
 </style><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body>
 <div id="authGate" dir="rtl">
   <div class="auth-card">
