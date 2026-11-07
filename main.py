@@ -1373,6 +1373,384 @@ async def character_travel_update_handler(request):
     })
 
 
+
+
+MARRIAGE_CEREMONIES = {
+    "ordinary": {"name": "معمولی", "coins": 200, "food": 150, "wine": 5, "bonus": 5, "days": 3},
+    "noble": {"name": "اشرافی", "coins": 600, "food": 400, "wine": 15, "bonus": 12, "days": 6},
+    "royal": {"name": "سلطنتی", "coins": 1500, "food": 1000, "wine": 40, "bonus": 22, "days": 10},
+}
+
+
+async def marriage_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        own = await conn.fetch("""
+            SELECT cp.id, cp.character_name, cp.gender, cp.spouse
+            FROM character_profiles cp
+            WHERE cp.owner_player_id=$1
+            ORDER BY cp.character_name
+        """, player["id"])
+        available = await conn.fetch("""
+            SELECT cp.id, cp.character_name, cp.house, p.id AS player_id,
+                   p.username AS player_name, h.name AS house_name
+            FROM character_profiles cp
+            JOIN players p ON p.id=cp.owner_player_id AND p.is_active=TRUE
+            LEFT JOIN houses h ON h.id=p.house_id
+            WHERE cp.gender='female' AND p.id<>$1
+              AND COALESCE(cp.spouse,'') IN ('','هنوز ازدواج نکرده')
+              AND NOT EXISTS (SELECT 1 FROM marriages m WHERE m.bride_profile_id=cp.id OR m.groom_profile_id=cp.id)
+            ORDER BY p.username, cp.character_name
+        """, player["id"])
+        inbox = await conn.fetch("""
+            SELECT mp.id, mp.status, mp.created_at, mp.groom_profile_id,
+                   gp.character_name AS groom_name, gp.house AS groom_house,
+                   mp.groom_player_id, p.username AS groom_player_name
+            FROM marriage_proposals mp
+            JOIN character_profiles gp ON gp.id=mp.groom_profile_id
+            JOIN players p ON p.id=mp.groom_player_id
+            WHERE mp.bride_player_id=$1 AND mp.status='pending'
+            ORDER BY mp.created_at DESC
+        """, player["id"])
+        outbox = await conn.fetch("""
+            SELECT mp.id, mp.status, mp.created_at, bp.character_name AS bride_name,
+                   p.username AS bride_player_name
+            FROM marriage_proposals mp
+            JOIN character_profiles bp ON bp.id=mp.bride_profile_id
+            JOIN players p ON p.id=mp.bride_player_id
+            WHERE mp.groom_player_id=$1
+            ORDER BY mp.created_at DESC LIMIT 50
+        """, player["id"])
+        marriages = await conn.fetch("""
+            SELECT m.*, gp.character_name AS groom_name, bp.character_name AS bride_name,
+                   gh.name AS groom_house_name, bh.name AS bride_house_name
+            FROM marriages m
+            JOIN character_profiles gp ON gp.id=m.groom_profile_id
+            JOIN character_profiles bp ON bp.id=m.bride_profile_id
+            LEFT JOIN players gpl ON gpl.id=m.groom_player_id
+            LEFT JOIN players bpl ON bpl.id=m.bride_player_id
+            LEFT JOIN houses gh ON gh.id=gpl.house_id
+            LEFT JOIN houses bh ON bh.id=bpl.house_id
+            WHERE m.groom_player_id=$1 OR m.bride_player_id=$1
+            ORDER BY m.created_at DESC
+        """, player["id"])
+        invitations = await conn.fetch("""
+            SELECT wi.id, wi.response, wi.created_at, m.id AS marriage_id,
+                   gp.character_name AS groom_name, bp.character_name AS bride_name,
+                   m.ceremony_level, m.ceremony_at, g.username AS groom_player_name,
+                   b.username AS bride_player_name
+            FROM wedding_invitations wi
+            JOIN marriages m ON m.id=wi.marriage_id
+            JOIN character_profiles gp ON gp.id=m.groom_profile_id
+            JOIN character_profiles bp ON bp.id=m.bride_profile_id
+            JOIN players g ON g.id=m.groom_player_id
+            JOIN players b ON b.id=m.bride_player_id
+            WHERE wi.invited_player_id=$1
+            ORDER BY wi.created_at DESC LIMIT 100
+        """, player["id"])
+    def iso(row, key):
+        value=row.get(key)
+        return value.isoformat() if value else None
+    def clean(row, dates=()):
+        item=dict(row)
+        for key in dates:
+            item[key]=iso(row,key)
+        return item
+    return web.json_response({
+        "ok": True, "my_characters":[dict(r) for r in own],
+        "available_brides":[dict(r) for r in available],
+        "incoming":[clean(r,("created_at",)) for r in inbox],
+        "outgoing":[clean(r,("created_at",)) for r in outbox],
+        "marriages":[clean(r,("created_at","ceremony_at","satisfaction_expires_at")) for r in marriages],
+        "invitations":[clean(r,("created_at","ceremony_at")) for r in invitations],
+        "ceremonies": MARRIAGE_CEREMONIES,
+    })
+
+
+async def marriage_proposal_create_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    try:
+        data=await request.json()
+        groom_id=int(data.get("groom_profile_id",0))
+        bride_id=int(data.get("bride_profile_id",0))
+    except (ValueError,TypeError,Exception):
+        return json_error("invalid_proposal")
+    if groom_id<=0 or bride_id<=0 or groom_id==bride_id:
+        return json_error("invalid_proposal")
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            groom=await conn.fetchrow("""
+                SELECT id,owner_player_id,character_name,gender,spouse
+                FROM character_profiles WHERE id=$1 FOR UPDATE
+            """,groom_id)
+            bride=await conn.fetchrow("""
+                SELECT id,owner_player_id,character_name,gender,spouse
+                FROM character_profiles WHERE id=$1 FOR UPDATE
+            """,bride_id)
+            if not groom or groom["owner_player_id"]!=player["id"]:
+                return json_error("groom_not_owned",403)
+            if not bride or bride["gender"]!="female" or groom["gender"]!="male":
+                return json_error("male_to_female_only",403)
+            if bride["owner_player_id"]==player["id"]:
+                return json_error("cannot_propose_to_self")
+            if not bride["owner_player_id"] or not await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride["owner_player_id"]
+            ):
+                return json_error("bride_unavailable")
+            if str(groom["spouse"] or "") not in ("","هنوز ازدواج نکرده") or str(bride["spouse"] or "") not in ("","هنوز ازدواج نکرده"):
+                return json_error("character_already_married")
+            exists=await conn.fetchval("""
+                SELECT EXISTS(SELECT 1 FROM marriages WHERE groom_profile_id=ANY($1::bigint[]) OR bride_profile_id=ANY($1::bigint[]))
+            """,[groom_id,bride_id])
+            if exists:
+                return json_error("character_already_married")
+            pending=await conn.fetchval("""
+                SELECT EXISTS(SELECT 1 FROM marriage_proposals
+                WHERE groom_profile_id=$1 AND bride_profile_id=$2 AND status='pending')
+            """,groom_id,bride_id)
+            if pending:
+                return json_error("proposal_already_pending")
+            row=await conn.fetchrow("""
+                INSERT INTO marriage_proposals
+                    (groom_player_id,bride_player_id,groom_profile_id,bride_profile_id)
+                VALUES ($1,$2,$3,$4) RETURNING id
+            """,player["id"],bride["owner_player_id"],groom_id,bride_id)
+    return web.json_response({"ok":True,"proposal_id":int(row["id"])})
+
+
+async def marriage_proposal_respond_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized",401)
+    try:
+        proposal_id=int(request.match_info["proposal_id"])
+        data=await request.json()
+        decision=str(data.get("decision","")).strip()
+    except Exception:
+        return json_error("invalid_response")
+    if decision not in ("accept","reject"):
+        return json_error("invalid_response")
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            proposal=await conn.fetchrow("""
+                SELECT * FROM marriage_proposals WHERE id=$1 FOR UPDATE
+            """,proposal_id)
+            if not proposal or proposal["bride_player_id"]!=player["id"] or proposal["status"]!="pending":
+                return json_error("proposal_not_found_or_not_yours",404)
+            if decision=="reject":
+                await conn.execute("UPDATE marriage_proposals SET status='rejected',responded_at=NOW() WHERE id=$1",proposal_id)
+                return web.json_response({"ok":True,"status":"rejected"})
+            groom=await conn.fetchrow("SELECT character_name FROM character_profiles WHERE id=$1 FOR UPDATE",proposal["groom_profile_id"])
+            bride=await conn.fetchrow("SELECT character_name FROM character_profiles WHERE id=$1 FOR UPDATE",proposal["bride_profile_id"])
+            if not groom or not bride:
+                return json_error("character_not_found")
+            already=await conn.fetchval("""
+                SELECT EXISTS(SELECT 1 FROM marriages WHERE groom_profile_id=ANY($1::bigint[]) OR bride_profile_id=ANY($1::bigint[]))
+            """,[proposal["groom_profile_id"],proposal["bride_profile_id"]])
+            if already:
+                return json_error("character_already_married")
+            marriage=await conn.fetchrow("""
+                INSERT INTO marriages (groom_player_id,bride_player_id,groom_profile_id,bride_profile_id)
+                VALUES ($1,$2,$3,$4) RETURNING id
+            """,proposal["groom_player_id"],proposal["bride_player_id"],proposal["groom_profile_id"],proposal["bride_profile_id"])
+            await conn.execute("""
+                UPDATE character_profiles SET spouse=$1,updated_at=NOW() WHERE id=$2
+            """,bride["character_name"],proposal["groom_profile_id"])
+            await conn.execute("""
+                UPDATE character_profiles SET spouse=$1,updated_at=NOW() WHERE id=$2
+            """,groom["character_name"],proposal["bride_profile_id"])
+            await conn.execute("UPDATE marriage_proposals SET status='accepted',responded_at=NOW() WHERE id=$1",proposal_id)
+    return web.json_response({"ok":True,"status":"accepted","marriage_id":int(marriage["id"])})
+
+
+async def marriage_ceremony_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized",401)
+    try:
+        marriage_id=int(request.match_info["marriage_id"])
+        data=await request.json()
+        level=str(data.get("level","")).strip()
+    except Exception:
+        return json_error("invalid_ceremony")
+    ceremony=MARRIAGE_CEREMONIES.get(level)
+    if not ceremony:
+        return json_error("invalid_ceremony")
+    import json
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            marriage=await conn.fetchrow("""
+                SELECT * FROM marriages WHERE id=$1 FOR UPDATE
+            """,marriage_id)
+            if not marriage or player["id"] not in (marriage["groom_player_id"],marriage["bride_player_id"]):
+                return json_error("marriage_not_found_or_not_yours",404)
+            if marriage["ceremony_level"]:
+                return json_error("ceremony_already_chosen")
+            groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",marriage["groom_player_id"])
+            if not groom_house_id:
+                return json_error("groom_has_no_house")
+            house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",groom_house_id)
+            if not house:
+                return json_error("house_not_found")
+            resources=_canonical_house_resources(_json_object(house["resources"]),_json_object(house["game_state"]).get("resources"))
+            special=resources.get("specialGoods") or {}
+            if int(resources.get("coins",0) or 0)<ceremony["coins"] or int(resources.get("food",0) or 0)<ceremony["food"] or int(special.get("wine",0) or 0)<ceremony["wine"]:
+                return json_error("insufficient_ceremony_resources")
+            resources["coins"]=int(resources.get("coins",0))-ceremony["coins"]
+            resources["food"]=int(resources.get("food",0))-ceremony["food"]
+            special["wine"]=int(special.get("wine",0))-ceremony["wine"]
+            resources["specialGoods"]=special
+            house_resources={
+                "wood":resources.get("wood",0),"stone":resources.get("stone",0),
+                "iron":resources.get("iron",0),"coins":resources["coins"],
+                "food":resources["food"],"subjects":resources.get("subjects",0),
+                "warhorses":resources.get("warhorses",0),
+                "fur":special.get("fur",0),"wool":special.get("wool",0),
+                "wine":special["wine"],"spice":special.get("spice",0),
+                "salt":special.get("salt",0),"black_iron":special.get("blackIron",0),
+            }
+            state=_json_object(house["game_state"])
+            state["resources"]=resources
+            state["publicSatisfactionBonus"]=ceremony["bonus"]
+            state["publicSatisfactionBonusExpiresAt"]=(await conn.fetchval(
+                "SELECT (NOW()+($1::text || ' days')::interval)",ceremony["days"]
+            )).isoformat()
+            await conn.execute("""
+                UPDATE houses SET resources=$1::jsonb,game_state=$2::jsonb,game_state_updated_at=NOW()
+                WHERE id=$3
+            """,json.dumps(house_resources,ensure_ascii=False),json.dumps(state,ensure_ascii=False),groom_house_id)
+            await conn.execute("""
+                UPDATE marriages SET ceremony_level=$1,ceremony_at=NOW(),
+                    satisfaction_bonus=$2,
+                    satisfaction_expires_at=NOW()+($3::text || ' days')::interval
+                WHERE id=$4
+            """,level,ceremony["bonus"],ceremony["days"],marriage_id)
+    return web.json_response({"ok":True,"ceremony":ceremony,"message":"ceremony_confirmed"})
+
+
+async def wedding_invite_all_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized",401)
+    try:
+        marriage_id=int(request.match_info["marriage_id"])
+    except ValueError:
+        return json_error("invalid_marriage_id")
+    async with request.app["db"].acquire() as conn:
+        marriage=await conn.fetchrow("SELECT * FROM marriages WHERE id=$1",marriage_id)
+        if not marriage or player["id"] not in (marriage["groom_player_id"],marriage["bride_player_id"]):
+            return json_error("marriage_not_found_or_not_yours",404)
+        if not marriage["ceremony_level"]:
+            return json_error("choose_ceremony_first")
+        result=await conn.execute("""
+            INSERT INTO wedding_invitations (marriage_id,invited_player_id)
+            SELECT $1,id FROM players
+            WHERE is_active=TRUE AND id NOT IN ($2,$3)
+            ON CONFLICT (marriage_id,invited_player_id) DO NOTHING
+        """,marriage_id,marriage["groom_player_id"],marriage["bride_player_id"])
+    return web.json_response({"ok":True,"message":"all_players_invited","result":result})
+
+
+async def wedding_invitation_respond_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized",401)
+    try:
+        invitation_id=int(request.match_info["invitation_id"])
+        data=await request.json()
+        response=str(data.get("response","")).strip()
+    except Exception:
+        return json_error("invalid_response")
+    if response not in ("attending","declined"):
+        return json_error("invalid_response")
+    async with request.app["db"].acquire() as conn:
+        result=await conn.execute("""
+            UPDATE wedding_invitations SET response=$1
+            WHERE id=$2 AND invited_player_id=$3
+        """,response,invitation_id,player["id"])
+    if result.endswith(" 0"):
+        return json_error("invitation_not_found",404)
+    return web.json_response({"ok":True})
+
+
+async def wedding_gift_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized",401)
+    if not player.get("house_id"):
+        return json_error("player_has_no_house",403)
+    try:
+        invitation_id=int(request.match_info["invitation_id"])
+        data=await request.json()
+        item=str(data.get("item_name","")).strip()
+        quantity=int(data.get("quantity",0))
+    except Exception:
+        return json_error("invalid_gift")
+    if item not in TRADE_GOODS or quantity<1 or quantity>1000000:
+        return json_error("invalid_gift")
+    import json
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            invite=await conn.fetchrow("""
+                SELECT wi.*,m.groom_player_id,m.bride_player_id,m.ceremony_level,
+                       gp.character_name AS groom_name,bp.character_name AS bride_name
+                FROM wedding_invitations wi JOIN marriages m ON m.id=wi.marriage_id
+                JOIN character_profiles gp ON gp.id=m.groom_profile_id
+                JOIN character_profiles bp ON bp.id=m.bride_profile_id
+                WHERE wi.id=$1 AND wi.invited_player_id=$2 FOR UPDATE OF wi
+            """,invitation_id,player["id"])
+            if not invite:
+                return json_error("invitation_not_found",404)
+            if invite["response"]=="declined":
+                return json_error("invitation_declined")
+            if not invite["ceremony_level"]:
+                return json_error("ceremony_not_selected")
+            groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",invite["groom_player_id"])
+            if not groom_house_id:
+                return json_error("groom_has_no_house")
+            guest_house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",player["house_id"])
+            target_house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",groom_house_id)
+            if not guest_house or not target_house:
+                return json_error("house_not_found")
+            guest=_canonical_house_resources(_json_object(guest_house["resources"]),_json_object(guest_house["game_state"]).get("resources"))
+            target=_canonical_house_resources(_json_object(target_house["resources"]),_json_object(target_house["game_state"]).get("resources"))
+            mapping={"چوب":("wood",None),"سنگ":("stone",None),"آهن":("iron",None),"غذا":("food",None),"اسب جنگی":("warhorses",None),"خز":("specialGoods","fur"),"پشم":("specialGoods","wool"),"شراب":("specialGoods","wine"),"ادویه":("specialGoods","spice"),"آهن سیاه":("specialGoods","blackIron"),"نمک":("specialGoods","salt")}
+            key,sub=mapping[item]
+            guest_bucket=guest[key] if sub else guest
+            target_bucket=target[key] if sub else target
+            available=int(guest_bucket.get(sub,0) if sub else guest_bucket.get(key,0) or 0)
+            if available<quantity:
+                return json_error("insufficient_gift_stock")
+            if sub:
+                guest_bucket[sub]=available-quantity
+                target_bucket[sub]=int(target_bucket.get(sub,0) or 0)+quantity
+            else:
+                guest[key]=available-quantity
+                target[key]=int(target.get(key,0) or 0)+quantity
+            def storage(r):
+                sp=r.get("specialGoods") or {}
+                return {"wood":r.get("wood",0),"stone":r.get("stone",0),"iron":r.get("iron",0),
+                    "coins":r.get("coins",0),"food":r.get("food",0),"subjects":r.get("subjects",0),
+                    "warhorses":r.get("warhorses",0),"fur":sp.get("fur",0),"wool":sp.get("wool",0),
+                    "wine":sp.get("wine",0),"spice":sp.get("spice",0),"salt":sp.get("salt",0),
+                    "black_iron":sp.get("blackIron",0)}
+            gs=_json_object(guest_house["game_state"]);ts=_json_object(target_house["game_state"])
+            gs["resources"]=guest;ts["resources"]=target
+            await conn.execute("UPDATE houses SET resources=$1::jsonb,game_state=$2::jsonb,game_state_updated_at=NOW() WHERE id=$3",
+                json.dumps(storage(guest),ensure_ascii=False),json.dumps(gs,ensure_ascii=False),player["house_id"])
+            await conn.execute("UPDATE houses SET resources=$1::jsonb,game_state=$2::jsonb,game_state_updated_at=NOW() WHERE id=$3",
+                json.dumps(storage(target),ensure_ascii=False),json.dumps(ts,ensure_ascii=False),groom_house_id)
+            await conn.execute("INSERT INTO wedding_gifts (invitation_id,sender_player_id,item_name,quantity) VALUES ($1,$2,$3,$4)",
+                invitation_id,player["id"],item,quantity)
+    return web.json_response({"ok":True,"message":"gift_sent"})
+
+
+
+
 async def family_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -3420,6 +3798,7 @@ async def on_startup(app):
                 title VARCHAR(300),
                 location VARCHAR(200),
                 spouse VARCHAR(300),
+                gender VARCHAR(10) NOT NULL DEFAULT 'unknown' CHECK (gender IN ('male','female','unknown')),
                 children TEXT,
                 dragon VARCHAR(180),
                 house VARCHAR(180),
@@ -3431,6 +3810,89 @@ async def on_startup(app):
                 faith INTEGER NOT NULL DEFAULT 50 CHECK (faith BETWEEN 0 AND 100),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("ALTER TABLE character_profiles ADD COLUMN IF NOT EXISTS gender VARCHAR(10) NOT NULL DEFAULT 'unknown'")
+        # Canonical gender tags for the named characters in the current roster.
+        await conn.execute("""
+            UPDATE character_profiles SET gender='female', updated_at=NOW()
+            WHERE lower(character_name) = ANY($1::text[])
+        """, [
+            'helaena targaryen','alicent hightower','rhaenyra targaryen',
+            'rhaenys targaryen','baela targaryen','rhaena targaryen',
+            'mysaria','laena velaryon','jeyne arryn','alys rivers',
+            'sabitha frey','black aly blackwood','netties',
+            'florence fossoway','elinda massey','lady sam',
+            'marilda of hull','aemma arryn','ysilla royce',
+            'cassella vaith','nymeria sand','tyene sand'
+        ])
+        await conn.execute("""
+            UPDATE character_profiles SET gender='male', updated_at=NOW()
+            WHERE gender='unknown' AND lower(character_name) = ANY($1::text[])
+        """, [
+            'aegon ii targaryen','aemond targaryen','daeron targaryen',
+            'alf white','ulf white','daemon targaryen','jacaerys velaryon',
+            'hugh hammer','corlys velaryon','adam velaryon','addam velaryon',
+            'alyn velaryon','bartimos celtigar','lord reynald darklyn',
+            'criston cole','arryk cargyll','erryk cargyll','ser luthor largent',
+            'lorent marbrand','willam royce','steffon darklyn',
+            'otto hightower','gwayne hightower','orwyle','tyland lannister',
+            'jasper wylde','borros baratheon','cregan stark','jacaerys velaryon',
+            'robert arryn','gerold royce','harrold westerling',
+            'hugh of the vale','oscar tully','grover tully','edmure tully',
+            'elmo tully','benjicot blackwood','samwell blackwood',
+            'lorent marbrand','garmund hightower','hobert hightower',
+            'lord beesbury','lyman beesbury','jason lannister',
+            'tyland lannister','addam of hull','qarlo'
+        ])
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS marriage_proposals (
+                id BIGSERIAL PRIMARY KEY,
+                groom_player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                bride_player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                groom_profile_id BIGINT NOT NULL REFERENCES character_profiles(id),
+                bride_profile_id BIGINT NOT NULL REFERENCES character_profiles(id),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','accepted','rejected','cancelled')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                responded_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS marriage_proposals_inbox_idx ON marriage_proposals (bride_player_id,status,created_at DESC)")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS marriages (
+                id BIGSERIAL PRIMARY KEY,
+                groom_player_id BIGINT NOT NULL REFERENCES players(id),
+                bride_player_id BIGINT NOT NULL REFERENCES players(id),
+                groom_profile_id BIGINT NOT NULL UNIQUE REFERENCES character_profiles(id),
+                bride_profile_id BIGINT NOT NULL UNIQUE REFERENCES character_profiles(id),
+                ceremony_level VARCHAR(20),
+                ceremony_at TIMESTAMPTZ,
+                satisfaction_bonus INTEGER NOT NULL DEFAULT 0,
+                satisfaction_expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CHECK (ceremony_level IS NULL OR ceremony_level IN ('ordinary','noble','royal'))
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS wedding_invitations (
+                id BIGSERIAL PRIMARY KEY,
+                marriage_id BIGINT NOT NULL REFERENCES marriages(id) ON DELETE CASCADE,
+                invited_player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                response VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (response IN ('pending','attending','declined')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (marriage_id, invited_player_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS wedding_gifts (
+                id BIGSERIAL PRIMARY KEY,
+                invitation_id BIGINT NOT NULL REFERENCES wedding_invitations(id) ON DELETE CASCADE,
+                sender_player_id BIGINT NOT NULL REFERENCES players(id),
+                item_name VARCHAR(100) NOT NULL,
+                quantity BIGINT NOT NULL CHECK (quantity > 0),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
         await conn.execute("""
@@ -3767,6 +4229,13 @@ def create_app():
     app.router.add_post("/api/military/campaigns", military_campaign_create_handler)
     app.router.add_post("/api/military/campaigns/{campaign_id}/respond", military_campaign_respond_handler)
     app.router.add_put("/api/military/campaigns/{campaign_id}/destination", military_campaign_destination_handler)
+    app.router.add_get("/api/marriage", marriage_handler)
+    app.router.add_post("/api/marriage/proposals", marriage_proposal_create_handler)
+    app.router.add_post("/api/marriage/proposals/{proposal_id}/respond", marriage_proposal_respond_handler)
+    app.router.add_post("/api/marriage/{marriage_id}/ceremony", marriage_ceremony_handler)
+    app.router.add_post("/api/marriage/{marriage_id}/invite", wedding_invite_all_handler)
+    app.router.add_post("/api/marriage/invitations/{invitation_id}/respond", wedding_invitation_respond_handler)
+    app.router.add_post("/api/marriage/invitations/{invitation_id}/gift", wedding_gift_handler)
     app.router.add_get("/api/family", family_handler)
     app.router.add_get("/api/castles/{castle_name}/members", castle_members_handler)
     app.router.add_get("/api/court/appointments", court_appointments_handler)
