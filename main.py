@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import secrets
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qsl, quote_plus
 
 import asyncpg
@@ -274,7 +275,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261106m")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107nav1")
         )]
     ])
     return keyboard
@@ -1387,17 +1388,23 @@ async def marriage_handler(request):
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
+        # Some existing game accounts are linked to their character by an exact
+        # character-name/username match rather than owner_player_id. Include that
+        # legacy ownership form in both lists so the selectors are not empty.
         own = await conn.fetch("""
             SELECT cp.id, cp.character_name, cp.gender, cp.spouse
             FROM character_profiles cp
             WHERE cp.owner_player_id=$1
+               OR (cp.owner_player_id IS NULL AND LOWER(BTRIM(cp.character_name))=LOWER(BTRIM($2)))
             ORDER BY cp.character_name
-        """, player["id"])
+        """, player["id"], player["username"])
         available = await conn.fetch("""
-            SELECT cp.id, cp.character_name, cp.house, p.id AS player_id,
-                   p.username AS player_name, h.name AS house_name
+            SELECT cp.id, cp.character_name, cp.gender, cp.house,
+                   p.id AS player_id, p.username AS player_name, h.name AS house_name
             FROM character_profiles cp
-            JOIN players p ON p.id=cp.owner_player_id AND p.is_active=TRUE
+            JOIN players p ON p.is_active=TRUE
+              AND (cp.owner_player_id=p.id OR
+                   (cp.owner_player_id IS NULL AND LOWER(BTRIM(cp.character_name))=LOWER(BTRIM(p.username))))
             LEFT JOIN houses h ON h.id=p.house_id
             WHERE cp.gender='female' AND p.id<>$1
               AND COALESCE(cp.spouse,'') IN ('','هنوز ازدواج نکرده','نیازمند تعیین','ثبت نشده')
@@ -1449,8 +1456,9 @@ async def marriage_handler(request):
         invitations = await conn.fetch("""
             SELECT wi.id, wi.response, wi.created_at, m.id AS marriage_id,
                    gp.character_name AS groom_name, bp.character_name AS bride_name,
-                   m.ceremony_level, m.ceremony_at, g.username AS groom_player_name,
-                   b.username AS bride_player_name
+                   m.ceremony_level, m.ceremony_at, m.scheduled_at,
+                   m.duration_minutes, m.ceremony_status,
+                   g.username AS groom_player_name, b.username AS bride_player_name
             FROM wedding_invitations wi
             JOIN marriages m ON m.id=wi.marriage_id
             JOIN character_profiles gp ON gp.id=m.groom_profile_id
@@ -1460,6 +1468,15 @@ async def marriage_handler(request):
             WHERE wi.invited_player_id=$1
             ORDER BY wi.created_at DESC LIMIT 100
         """, player["id"])
+        marriage_ids=list({int(row["id"]) for row in marriages} | {int(row["marriage_id"]) for row in invitations})
+        guests = await conn.fetch("""
+            SELECT wi.id AS invitation_id, wi.marriage_id, wi.response,
+                   p.id AS player_id, p.username AS player_name
+            FROM wedding_invitations wi
+            JOIN players p ON p.id=wi.invited_player_id
+            WHERE wi.marriage_id=ANY($1::bigint[])
+            ORDER BY wi.created_at, p.username
+        """, marriage_ids)
     def iso(row, key):
         value=row[key]
         return value.isoformat() if value else None
@@ -1473,8 +1490,9 @@ async def marriage_handler(request):
         "available_brides":[dict(r) for r in available],
         "incoming":[clean(r,("created_at",)) for r in inbox],
         "outgoing":[clean(r,("created_at",)) for r in outbox],
-        "marriages":[clean(r,("created_at","ceremony_at","satisfaction_expires_at")) for r in marriages],
-        "invitations":[clean(r,("created_at","ceremony_at")) for r in invitations],
+        "marriages":[clean(r,("created_at","ceremony_at","scheduled_at","started_at","completed_at","satisfaction_expires_at")) for r in marriages],
+        "invitations":[clean(r,("created_at","ceremony_at","scheduled_at")) for r in invitations],
+        "guests":[dict(r) for r in guests],
         "gifts":[clean(r,("created_at",)) for r in gifts],
         "ceremonies": MARRIAGE_CEREMONIES,
     })
@@ -1502,14 +1520,29 @@ async def marriage_proposal_create_handler(request):
                 SELECT id,owner_player_id,character_name,gender,spouse
                 FROM character_profiles WHERE id=$1 FOR UPDATE
             """,bride_id)
-            if not groom or groom["owner_player_id"]!=player["id"]:
+            groom_is_owned = bool(groom and (
+                groom["owner_player_id"]==player["id"] or
+                (groom["owner_player_id"] is None and
+                 str(groom["character_name"]).strip().casefold()==str(player["username"]).strip().casefold())
+            ))
+            if not groom or not groom_is_owned:
                 return json_error("groom_not_owned",403)
             if not bride or bride["gender"]!="female" or groom["gender"]!="male":
                 return json_error("male_to_female_only",403)
-            if bride["owner_player_id"]==player["id"]:
+            if bride["owner_player_id"]==player["id"] or (
+                bride["owner_player_id"] is None and
+                str(bride["character_name"]).strip().casefold()==str(player["username"]).strip().casefold()
+            ):
                 return json_error("cannot_propose_to_self")
-            if not bride["owner_player_id"] or not await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride["owner_player_id"]
+            bride_player_id = bride["owner_player_id"]
+            if bride_player_id is None:
+                bride_player_id = await conn.fetchval("""
+                    SELECT id FROM players
+                    WHERE is_active=TRUE AND LOWER(BTRIM(username))=LOWER(BTRIM($1))
+                    LIMIT 1
+                """, bride["character_name"])
+            if not bride_player_id or not await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride_player_id
             ):
                 return json_error("bride_unavailable")
             if str(groom["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده") or str(bride["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده"):
@@ -1529,7 +1562,7 @@ async def marriage_proposal_create_handler(request):
                 INSERT INTO marriage_proposals
                     (groom_player_id,bride_player_id,groom_profile_id,bride_profile_id)
                 VALUES ($1,$2,$3,$4) RETURNING id
-            """,player["id"],bride["owner_player_id"],groom_id,bride_id)
+            """,player["id"],bride_player_id,groom_id,bride_id)
     return web.json_response({"ok":True,"proposal_id":int(row["id"])})
 
 
@@ -1586,11 +1619,24 @@ async def marriage_ceremony_handler(request):
         marriage_id=int(request.match_info["marriage_id"])
         data=await request.json()
         level=str(data.get("level","")).strip()
+        scheduled_raw=str(data.get("scheduled_at","")).strip()
+        duration_minutes=int(data.get("duration_minutes",60))
+        scheduled_at=datetime.fromisoformat(scheduled_raw.replace("Z","+00:00"))
+        if scheduled_at.tzinfo is None:
+            return json_error("timezone_required")
+        scheduled_at=scheduled_at.astimezone(timezone.utc)
     except Exception:
         return json_error("invalid_ceremony")
     ceremony=MARRIAGE_CEREMONIES.get(level)
     if not ceremony:
         return json_error("invalid_ceremony")
+    if duration_minutes not in (30,60,120):
+        return json_error("invalid_duration")
+    now=datetime.now(timezone.utc)
+    if scheduled_at < now + timedelta(minutes=10):
+        return json_error("ceremony_must_be_at_least_10_minutes_ahead")
+    if scheduled_at > now + timedelta(days=30):
+        return json_error("ceremony_date_too_far")
     import json
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
@@ -1602,7 +1648,6 @@ async def marriage_ceremony_handler(request):
             if marriage["ceremony_level"]:
                 return json_error("ceremony_already_chosen")
             groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",marriage["groom_player_id"])
-            bride_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",marriage["bride_player_id"])
             if not groom_house_id:
                 return json_error("groom_has_no_house")
             house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",groom_house_id)
@@ -1627,34 +1672,22 @@ async def marriage_ceremony_handler(request):
             }
             state=_json_object(house["game_state"])
             state["resources"]=resources
-            bonus_expires=await conn.fetchval(
-                "SELECT (NOW()+($1::text || ' days')::interval)",ceremony["days"]
-            )
-            state["publicSatisfactionBonus"]=ceremony["bonus"]
-            state["publicSatisfactionBonusExpiresAt"]=bonus_expires.isoformat()
             await conn.execute("""
                 UPDATE houses SET resources=$1::jsonb,game_state=$2::jsonb,game_state_updated_at=NOW()
                 WHERE id=$3
             """,json.dumps(house_resources,ensure_ascii=False),json.dumps(state,ensure_ascii=False),groom_house_id)
-            if bride_house_id and int(bride_house_id)!=int(groom_house_id):
-                bride_state_row=await conn.fetchrow(
-                    "SELECT game_state FROM houses WHERE id=$1 FOR UPDATE",bride_house_id
-                )
-                if bride_state_row:
-                    bride_state=_json_object(bride_state_row["game_state"])
-                    bride_state["publicSatisfactionBonus"]=ceremony["bonus"]
-                    bride_state["publicSatisfactionBonusExpiresAt"]=bonus_expires.isoformat()
-                    await conn.execute(
-                        "UPDATE houses SET game_state=$1::jsonb,game_state_updated_at=NOW() WHERE id=$2",
-                        json.dumps(bride_state,ensure_ascii=False),bride_house_id
-                    )
             await conn.execute("""
-                UPDATE marriages SET ceremony_level=$1,ceremony_at=NOW(),
-                    satisfaction_bonus=$2,
-                    satisfaction_expires_at=NOW()+($3::text || ' days')::interval
-                WHERE id=$4
-            """,level,ceremony["bonus"],ceremony["days"],marriage_id)
-    return web.json_response({"ok":True,"ceremony":ceremony,"message":"ceremony_confirmed"})
+                UPDATE marriages
+                SET ceremony_level=$1,ceremony_at=$2,scheduled_at=$2,
+                    duration_minutes=$3,ceremony_status='scheduled',
+                    satisfaction_bonus=$4,satisfaction_expires_at=NULL
+                WHERE id=$5
+            """,level,scheduled_at,duration_minutes,ceremony["bonus"],marriage_id)
+    return web.json_response({
+        "ok":True,"ceremony":ceremony,"scheduled_at":scheduled_at.isoformat(),
+        "duration_minutes":duration_minutes,"status":"scheduled",
+        "message":"ceremony_scheduled"
+    })
 
 
 async def wedding_invite_all_handler(request):
@@ -1722,6 +1755,7 @@ async def wedding_gift_handler(request):
         async with conn.transaction():
             invite=await conn.fetchrow("""
                 SELECT wi.*,m.groom_player_id,m.bride_player_id,m.ceremony_level,
+                       m.ceremony_status,
                        gp.character_name AS groom_name,bp.character_name AS bride_name
                 FROM wedding_invitations wi JOIN marriages m ON m.id=wi.marriage_id
                 JOIN character_profiles gp ON gp.id=m.groom_profile_id
@@ -1732,8 +1766,12 @@ async def wedding_gift_handler(request):
                 return json_error("invitation_not_found",404)
             if invite["response"]=="declined":
                 return json_error("invitation_declined")
+            if invite["response"]!="attending":
+                return json_error("accept_invitation_before_gifting")
             if not invite["ceremony_level"]:
                 return json_error("ceremony_not_selected")
+            if invite["ceremony_status"] not in ("scheduled","live"):
+                return json_error("wedding_not_open_for_gifts")
             groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",invite["groom_player_id"])
             if not groom_house_id:
                 return json_error("groom_has_no_house")
@@ -3610,10 +3648,26 @@ async def admin_assign_profile_owner_handler(request):
     return web.json_response({"ok": True, "profile": dict(updated)})
 
 
-async def index_handler(request):
-    # Always revalidate the game shell so embedded browsers do not keep an old menu/pages bundle.
+async def marriage_asset_handler(request):
     return web.FileResponse(
-        WEBAPP_FILE,
+        BASE_DIR / "static" / "marriage.js",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+async def index_handler(request):
+    # Inject the marriage entry point without rewriting the large existing game shell.
+    html = WEBAPP_FILE.read_text(encoding="utf-8")
+    script_tag = '<script src="/marriage.js?v=3" defer></script>'
+    if script_tag not in html:
+        if "</body>" in html:
+            html = html.replace("</body>", script_tag + "</body>", 1)
+        else:
+            html += script_tag
+    return web.Response(
+        text=html,
+        content_type="text/html",
+        charset="utf-8",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -3915,12 +3969,32 @@ async def on_startup(app):
                 bride_profile_id BIGINT NOT NULL UNIQUE REFERENCES character_profiles(id),
                 ceremony_level VARCHAR(20),
                 ceremony_at TIMESTAMPTZ,
+                scheduled_at TIMESTAMPTZ,
+                duration_minutes INTEGER NOT NULL DEFAULT 60 CHECK (duration_minutes IN (30,60,120)),
+                ceremony_status VARCHAR(20) NOT NULL DEFAULT 'planning'
+                    CHECK (ceremony_status IN ('planning','scheduled','live','completed')),
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
                 satisfaction_bonus INTEGER NOT NULL DEFAULT 0,
                 satisfaction_expires_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CHECK (ceremony_level IS NULL OR ceremony_level IN ('ordinary','noble','royal'))
             )
         """)
+        await conn.execute("ALTER TABLE marriages ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ")
+        await conn.execute("ALTER TABLE marriages ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 60")
+        await conn.execute("ALTER TABLE marriages ADD COLUMN IF NOT EXISTS ceremony_status VARCHAR(20) NOT NULL DEFAULT 'planning'")
+        await conn.execute("ALTER TABLE marriages ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ")
+        await conn.execute("ALTER TABLE marriages ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ")
+        await conn.execute("""
+            UPDATE marriages
+            SET ceremony_status='completed',
+                started_at=COALESCE(started_at,ceremony_at),
+                completed_at=COALESCE(completed_at,ceremony_at)
+            WHERE ceremony_level IS NOT NULL AND ceremony_at IS NOT NULL
+              AND ceremony_status='planning'
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS marriages_schedule_idx ON marriages (ceremony_status, scheduled_at)")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS wedding_invitations (
                 id BIGSERIAL PRIMARY KEY,
@@ -4248,7 +4322,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261106m"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107nav1"),
             )
         )
     except Exception:
@@ -4274,8 +4348,76 @@ async def on_startup(app):
         )
 
 
+async def wedding_scheduler_loop(app):
+    """Promote scheduled weddings to live and complete them using database time."""
+    while True:
+        try:
+            async with app["db"].acquire() as conn:
+                async with conn.transaction():
+                    due=await conn.fetch("""
+                        SELECT * FROM marriages
+                        WHERE ceremony_status='scheduled' AND scheduled_at<=NOW()
+                        ORDER BY scheduled_at
+                        LIMIT 20
+                        FOR UPDATE SKIP LOCKED
+                    """)
+                    import json
+                    for marriage in due:
+                        groom_house_id=await conn.fetchval(
+                            "SELECT house_id FROM players WHERE id=$1",marriage["groom_player_id"]
+                        )
+                        bride_house_id=await conn.fetchval(
+                            "SELECT house_id FROM players WHERE id=$1",marriage["bride_player_id"]
+                        )
+                        expiry=await conn.fetchval(
+                            "SELECT NOW()+($1::text || ' days')::interval",
+                            MARRIAGE_CEREMONIES[marriage["ceremony_level"]]["days"]
+                        )
+                        for house_id in sorted({int(x) for x in (groom_house_id,bride_house_id) if x}):
+                            row=await conn.fetchrow(
+                                "SELECT game_state FROM houses WHERE id=$1 FOR UPDATE",house_id
+                            )
+                            if not row:
+                                continue
+                            state=_json_object(row["game_state"])
+                            state["publicSatisfactionBonus"]=int(marriage["satisfaction_bonus"])
+                            state["publicSatisfactionBonusStartsAt"]=datetime.now(timezone.utc).isoformat()
+                            state["publicSatisfactionBonusExpiresAt"]=expiry.isoformat()
+                            await conn.execute(
+                                "UPDATE houses SET game_state=$1::jsonb,game_state_updated_at=NOW() WHERE id=$2",
+                                json.dumps(state,ensure_ascii=False),house_id
+                            )
+                        await conn.execute("""
+                            UPDATE marriages
+                            SET ceremony_status='live',started_at=NOW(),satisfaction_expires_at=$1
+                            WHERE id=$2
+                        """,expiry,marriage["id"])
+                    await conn.execute("""
+                        UPDATE marriages
+                        SET ceremony_status='completed',completed_at=NOW()
+                        WHERE ceremony_status='live'
+                          AND started_at + duration_minutes * INTERVAL '1 minute' <= NOW()
+                    """)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Wedding scheduler iteration failed")
+        await asyncio.sleep(10)
+
+
+async def start_wedding_scheduler(app):
+    app["wedding_scheduler_task"]=asyncio.create_task(wedding_scheduler_loop(app))
+
+
 async def on_cleanup(app):
     global db_pool
+    task=app.get("wedding_scheduler_task")
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     if app.get("db"):
         await app["db"].close()
     db_pool = None
@@ -4300,6 +4442,7 @@ def create_app():
     app.router.add_get("/app-v3", index_handler)
     app.router.add_get("/play-v4", index_handler)
     app.router.add_get("/play-v5", index_handler)
+    app.router.add_get("/marriage.js", marriage_asset_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_post("/api/auth/desktop/request", desktop_login_request_handler)
@@ -4368,6 +4511,7 @@ def create_app():
     setup_application(app, dp, bot=bot)
 
     app.on_startup.append(on_startup)
+    app.on_startup.append(start_wedding_scheduler)
     app.on_cleanup.append(on_cleanup)
     return app
 
