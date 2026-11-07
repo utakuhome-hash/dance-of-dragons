@@ -6,6 +6,7 @@ import time
 import hmac
 import hashlib
 import secrets
+import random
 from pathlib import Path
 from urllib.parse import parse_qsl, quote_plus
 
@@ -2885,6 +2886,142 @@ async def trade_contract_respond_handler(request):
     return web.json_response({"ok": True, "status": status})
 
 
+
+
+async def player_spy_rank(conn, player):
+    """Resolve espionage access from current court appointments, never client claims."""
+    rows = await conn.fetch(
+        """
+        SELECT post_key
+        FROM court_appointments
+        WHERE lower(trim(appointee_name)) = lower(trim($1))
+          AND post_key IN ('whispers', 'spymaster')
+        """,
+        player["username"],
+    )
+    keys = {row["post_key"] for row in rows}
+    return "spymaster" if "whispers" in keys else ("house_spy" if "spymaster" in keys else None)
+
+
+async def espionage_overview_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rank = await player_spy_rank(conn, player)
+        if not rank:
+            return json_error("forbidden", 403)
+        targets = await conn.fetch(
+            """
+            SELECT castle_name, level, last_attempt_date
+            FROM spy_infiltration
+            ORDER BY castle_name
+            """
+        )
+        letters = await conn.fetch(
+            """
+            SELECT DISTINCT ON (l.id)
+                   l.id, l.subject, l.created_at,
+                   sender.username AS sender_name,
+                   recipient.username AS recipient_name
+            FROM spy_tracked_letters t
+            JOIN game_letters l ON l.id = t.letter_id
+            JOIN players sender ON sender.id = l.sender_player_id
+            JOIN players recipient ON recipient.id = l.recipient_player_id
+            WHERE l.is_anonymous = FALSE
+            ORDER BY l.id, t.detected_at DESC
+            LIMIT 100
+            """
+        )
+        castles = await conn.fetch(
+            """
+            SELECT DISTINCT castle_name FROM (
+                SELECT NULLIF(trim(castle), '') AS castle_name FROM houses
+                UNION
+                SELECT NULLIF(trim(castle_name), '') AS castle_name FROM players
+            ) c WHERE castle_name IS NOT NULL
+            ORDER BY castle_name
+            """
+        )
+    return web.json_response({
+        "ok": True,
+        "rank": rank,
+        "targets": [
+            {"castle_name": row["castle_name"], "level": row["level"],
+             "last_attempt_date": row["last_attempt_date"].isoformat() if row["last_attempt_date"] else None}
+            for row in targets
+        ],
+        "castles": [row["castle_name"] for row in castles],
+        "tracked_letters": [
+            {"id": row["id"], "subject": row["subject"],
+             "sender_name": row["sender_name"], "recipient_name": row["recipient_name"],
+             "created_at": row["created_at"].isoformat()}
+            for row in letters
+        ],
+    })
+
+
+async def espionage_infiltrate_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    try:
+        data = await request.json()
+        castle_name = str(data.get("castle_name") or "").strip()
+    except Exception:
+        return json_error("invalid_request")
+    if not castle_name or len(castle_name) > 150:
+        return json_error("invalid_castle_name")
+    async with request.app["db"].acquire() as conn:
+        rank = await player_spy_rank(conn, player)
+        if rank != "spymaster":
+            return json_error("forbidden", 403)
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                """
+                SELECT castle_name FROM (
+                    SELECT NULLIF(trim(castle), '') AS castle_name FROM houses
+                    UNION
+                    SELECT NULLIF(trim(castle_name), '') AS castle_name FROM players
+                ) c WHERE lower(castle_name) = lower($1)
+                LIMIT 1
+                """,
+                castle_name,
+            )
+            if not target:
+                return json_error("castle_not_found", 404)
+            canonical = target["castle_name"]
+            row = await conn.fetchrow(
+                """
+                INSERT INTO spy_infiltration (castle_name, level, last_attempt_date, updated_at)
+                VALUES ($1, 0, NULL, NOW())
+                ON CONFLICT (castle_name) DO UPDATE SET castle_name = EXCLUDED.castle_name
+                RETURNING level, last_attempt_date
+                """,
+                canonical,
+            )
+            attempted = await conn.fetchrow(
+                "SELECT last_attempt_date = CURRENT_DATE AS used_today FROM spy_infiltration WHERE castle_name=$1 FOR UPDATE",
+                canonical,
+            )
+            if attempted and attempted["used_today"]:
+                return json_error("attempt_already_used_today", 409)
+            success = random.random() < 0.35
+            new_level = min(100, int(row["level"]) + (10 if success else 0))
+            await conn.execute(
+                """
+                UPDATE spy_infiltration
+                SET level=$2, last_attempt_date=CURRENT_DATE, updated_at=NOW()
+                WHERE castle_name=$1
+                """,
+                canonical, new_level,
+            )
+    return web.json_response({
+        "ok": True, "success": success, "level": new_level,
+        "message": "نفوذ افزایش یافت." if success else "تلاش امروز نتیجه نداد.",
+    })
+
+
 async def mail_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -2972,6 +3109,37 @@ async def mail_send_handler(request):
             """,
             player["id"], recipient_id, subject, body, category, is_anonymous,
         )
+    # Anonymous letters are deliberately excluded from all espionage checks.
+    if not is_anonymous:
+        async with request.app["db"].acquire() as conn:
+            sender_castle, recipient_castle = await conn.fetchrow(
+                """
+                SELECT
+                    COALESCE(NULLIF(trim(sender.castle_name), ''), sender_house.castle) AS sender_castle,
+                    COALESCE(NULLIF(trim(recipient.castle_name), ''), recipient_house.castle) AS recipient_castle
+                FROM players sender
+                LEFT JOIN houses sender_house ON sender_house.id=sender.house_id
+                JOIN players recipient ON recipient.id=$2
+                LEFT JOIN houses recipient_house ON recipient_house.id=recipient.house_id
+                WHERE sender.id=$1
+                """,
+                player["id"], recipient_id,
+            )
+            targets = {c for c in (sender_castle, recipient_castle) if c}
+            for target_castle in targets:
+                level = await conn.fetchval(
+                    "SELECT level FROM spy_infiltration WHERE lower(castle_name)=lower($1)",
+                    target_castle,
+                )
+                if level and random.random() * 100 < int(level):
+                    await conn.execute(
+                        """
+                        INSERT INTO spy_tracked_letters (letter_id, target_castle)
+                        VALUES ($1, $2) ON CONFLICT DO NOTHING
+                        """,
+                        row["id"], target_castle,
+                    )
+
     letter = dict(row)
     if letter.get("created_at") is not None:
         letter["created_at"] = letter["created_at"].isoformat()
@@ -4416,6 +4584,23 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE game_letters ADD COLUMN IF NOT EXISTS is_anonymous BOOLEAN NOT NULL DEFAULT FALSE")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS spy_infiltration (
+                castle_name VARCHAR(150) PRIMARY KEY,
+                level INTEGER NOT NULL DEFAULT 0 CHECK (level >= 0 AND level <= 100),
+                last_attempt_date DATE,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS spy_tracked_letters (
+                letter_id BIGINT NOT NULL REFERENCES game_letters(id) ON DELETE CASCADE,
+                target_castle VARCHAR(150) NOT NULL,
+                detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (letter_id, target_castle)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS spy_tracked_letters_detected_idx ON spy_tracked_letters (detected_at DESC)")
         # Preserve existing and future player letters; never clear the mailbox at startup.
 
         await conn.execute("""
@@ -4558,6 +4743,8 @@ def create_app():
     app.router.add_get("/api/market/listings", market_listings_handler)
     app.router.add_post("/api/market/listings", market_create_listing_handler)
     app.router.add_delete("/api/market/listings/{listing_id}", market_cancel_listing_handler)
+    app.router.add_get("/api/espionage", espionage_overview_handler)
+    app.router.add_post("/api/espionage/infiltrate", espionage_infiltrate_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
     app.router.add_get("/api/mail", mail_list_handler)
     app.router.add_get("/api/mail/unread-count", mail_unread_count_handler)
