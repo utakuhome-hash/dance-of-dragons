@@ -2741,7 +2741,7 @@ async def rumor_create_handler(request):
         async with conn.transaction():
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended('game-rumor:' || $1::text, 0))",
-                player["id"],
+                str(player["id"]),
             )
             today_count = await conn.fetchval("""
                 SELECT COUNT(*) FROM game_rumors
