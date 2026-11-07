@@ -3187,7 +3187,7 @@ async def twins_policy_handler(request):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
         policy = await conn.fetchrow("SELECT * FROM twins_bridge_policy WHERE id=1")
-        houses = await conn.fetch("SELECT id,name FROM houses ORDER BY name")
+        houses = await conn.fetch("SELECT id,name,castle FROM houses ORDER BY name")
         rows = await conn.fetch("""
             SELECT c.id,c.owner_house_id,h.name AS house_name,c.origin,c.destination,
                    c.cargo,c.quantity,c.route,c.status,c.created_at,c.updated_at
