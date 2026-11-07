@@ -2695,6 +2695,103 @@ async def mail_players_handler(request):
 
 
 
+
+async def rumors_list_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, content, created_at
+            FROM game_rumors
+            ORDER BY created_at DESC
+            LIMIT 200
+        """)
+        today_count = await conn.fetchval("""
+            SELECT COUNT(*) FROM game_rumors
+            WHERE author_player_id=$1 AND created_at::date=CURRENT_DATE
+        """, player["id"])
+    rumors = [{
+        "id": int(row["id"]),
+        "content": row["content"],
+        "created_at": row["created_at"].isoformat(),
+    } for row in rows]
+    return web.json_response({
+        "ok": True,
+        "rumors": rumors,
+        "today_count": int(today_count or 0),
+        "daily_limit": 5,
+    })
+
+
+async def rumor_create_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player["is_active"]:
+        return json_error("unauthorized", 401)
+    try:
+        data = await request.json()
+        content = str(data.get("content", "")).strip()
+    except Exception:
+        return json_error("invalid_json", 400)
+    if not content:
+        return json_error("empty_rumor", 400)
+    if len(content) > 500:
+        return json_error("rumor_too_long", 400)
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended('game-rumor:' || $1::text, 0))",
+                player["id"],
+            )
+            today_count = await conn.fetchval("""
+                SELECT COUNT(*) FROM game_rumors
+                WHERE author_player_id=$1 AND created_at::date=CURRENT_DATE
+            """, player["id"])
+            if int(today_count or 0) >= 5:
+                return json_error("daily_rumor_limit_reached", 429)
+            row = await conn.fetchrow("""
+                INSERT INTO game_rumors (author_player_id, content)
+                VALUES ($1, $2)
+                RETURNING id, content, created_at
+            """, player["id"], content)
+    return web.json_response({
+        "ok": True,
+        "rumor": {
+            "id": int(row["id"]),
+            "content": row["content"],
+            "created_at": row["created_at"].isoformat(),
+        },
+        "today_count": int(today_count or 0) + 1,
+        "daily_limit": 5,
+    })
+
+
+async def admin_rumors_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT r.id, r.content, r.created_at, r.author_player_id,
+                   p.username AS author_username, p.telegram_id AS author_telegram_id
+            FROM game_rumors r
+            JOIN players p ON p.id=r.author_player_id
+            ORDER BY r.created_at DESC
+            LIMIT 500
+        """)
+    return web.json_response({
+        "ok": True,
+        "rumors": [{
+            "id": int(row["id"]),
+            "content": row["content"],
+            "created_at": row["created_at"].isoformat(),
+            "author_player_id": int(row["author_player_id"]),
+            "author_username": row["author_username"],
+            "author_telegram_id": row["author_telegram_id"],
+        } for row in rows],
+    })
+
+
 async def market_listings_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -4593,6 +4690,16 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_inbox_idx ON game_letters (recipient_player_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_letters_outbox_idx ON game_letters (sender_player_id, created_at DESC)")
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS game_rumors (
+                id BIGSERIAL PRIMARY KEY,
+                author_player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                content VARCHAR(500) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS game_rumors_created_idx ON game_rumors (created_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS game_rumors_author_date_idx ON game_rumors (author_player_id, created_at DESC)")
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS spy_infiltration (
                 castle_name VARCHAR(150) PRIMARY KEY,
                 level INTEGER NOT NULL DEFAULT 0 CHECK (level >= 0 AND level <= 100),
@@ -4748,6 +4855,9 @@ def create_app():
     app.router.add_get("/api/trade/contracts", trade_contracts_handler)
     app.router.add_post("/api/trade/contracts", trade_contract_create_handler)
     app.router.add_post("/api/trade/contracts/{contract_id}/respond", trade_contract_respond_handler)
+    app.router.add_get("/api/rumors", rumors_list_handler)
+    app.router.add_post("/api/rumors", rumor_create_handler)
+    app.router.add_get("/api/admin/rumors", admin_rumors_handler)
     app.router.add_get("/api/market/listings", market_listings_handler)
     app.router.add_post("/api/market/listings", market_create_listing_handler)
     app.router.add_delete("/api/market/listings/{listing_id}", market_cancel_listing_handler)
