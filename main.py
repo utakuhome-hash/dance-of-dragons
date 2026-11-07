@@ -2892,12 +2892,17 @@ async def player_spy_rank(conn, player):
     """Resolve espionage access from current court appointments, never client claims."""
     rows = await conn.fetch(
         """
-        SELECT post_key
-        FROM court_appointments
-        WHERE lower(trim(appointee_name)) = lower(trim($1))
-          AND post_key IN ('whispers', 'spymaster')
+        SELECT DISTINCT ca.post_key
+        FROM court_appointments ca
+        LEFT JOIN character_profiles cp
+          ON lower(trim(cp.character_name)) = lower(trim(ca.appointee_name))
+        WHERE ca.post_key IN ('whispers', 'spymaster')
+          AND (
+              lower(trim(ca.appointee_name)) = lower(trim($1))
+              OR cp.owner_player_id = $2
+          )
         """,
-        player["username"],
+        player["username"], player["id"],
     )
     keys = {row["post_key"] for row in rows}
     return "spymaster" if "whispers" in keys else ("house_spy" if "spymaster" in keys else None)
