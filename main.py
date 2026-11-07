@@ -2003,9 +2003,11 @@ async def military_requests_handler(request):
             ORDER BY cp.character_name
         """)
         requests = await conn.fetch("""
-            SELECT m.*, s.username AS sender_name, r.username AS recipient_name
+            SELECT m.*, s.username AS sender_name, p.username AS recipient_name,
+                   br.winner AS battle_winner, br.attacker_losses, br.defender_losses, br.result_note
             FROM military_campaigns m JOIN players s ON s.id=m.sender_player_id
-            LEFT JOIN players r ON r.id=m.commander_player_id
+            LEFT JOIN players p ON p.id=m.commander_player_id
+            LEFT JOIN military_campaign_results br ON br.campaign_id=m.id
             WHERE m.sender_player_id=$1 OR m.commander_player_id=$1
             ORDER BY m.created_at DESC LIMIT 100
         """, player["id"])
