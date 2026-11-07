@@ -3850,7 +3850,7 @@ async def on_startup(app):
         # Canonical gender tags for the named characters in the current roster.
         await conn.execute("""
             UPDATE character_profiles SET gender='female', updated_at=NOW()
-            WHERE lower(character_name) = ANY($1::text[])
+            WHERE gender='unknown' AND lower(character_name) = ANY($1::text[])
         """, [
             'helaena targaryen','alicent hightower','rhaenyra targaryen',
             'rhaenys targaryen','baela targaryen','rhaena targaryen',
