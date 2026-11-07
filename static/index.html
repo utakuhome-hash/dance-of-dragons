@@ -31,45 +31,6 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
 .nav button.active .nav-art{transform:translateY(-2px) scale(1.06);filter:drop-shadow(0 0 7px #f2c76c99) drop-shadow(0 2px 4px #000)}
 .nav button span{font-size:9px;color:#e6d1a6;text-shadow:0 1px 3px #000}
 @media(max-width:380px){.nav button .nav-art{width:40px;height:40px}.nav button span{font-size:8px}}
-
-/* Keep every game section visible without requiring horizontal swiping. */
-.nav{
- display:grid!important;
- grid-template-columns:repeat(7,minmax(0,1fr))!important;
- grid-auto-rows:58px!important;
- gap:3px!important;
- height:auto!important;
- max-height:none!important;
- overflow:visible!important;
- padding:5px 6px calc(5px + var(--safe-bottom))!important;
- align-items:stretch!important;
-}
-.nav button,
-.nav button[data-page="dashboard"],
-.nav button[data-page="warehouse"],
-.nav button.warehouse-fixed{
- position:relative!important;
- inset:auto!important;
- transform:none!important;
- flex:none!important;
- width:auto!important;
- min-width:0!important;
- max-width:none!important;
- height:58px!important;
- min-height:58px!important;
- padding:2px 1px!important;
- display:flex!important;
- visibility:visible!important;
- opacity:1!important;
- pointer-events:auto!important;
-}
-.nav button .nav-art{width:32px!important;height:32px!important;object-fit:contain!important}
-.nav button span{font-size:8px!important;white-space:nowrap!important}
-@media(max-width:380px){
- .nav{grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:2px!important;padding-left:4px!important;padding-right:4px!important}
- .nav button .nav-art{width:28px!important;height:28px!important}
- .nav button span{font-size:7px!important}
-}
 </style><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body>
 <div id="authGate" dir="rtl">
   <div class="auth-card">
