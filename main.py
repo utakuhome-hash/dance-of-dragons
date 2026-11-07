@@ -2696,6 +2696,236 @@ async def mail_players_handler(request):
 
 
 
+
+SEPT_ADMIN_TELEGRAM_ID = 8823771080
+SEPT_RESOURCE_KEYS = {"coins", "food", "wood", "stone", "iron", "wine", "salt", "fur", "wool", "spice", "black_iron"}
+SEPT_RESOURCE_LABELS = {
+    "coins": "سکه", "food": "غذا", "wood": "چوب", "stone": "سنگ",
+    "iron": "آهن", "wine": "شراب", "salt": "نمک", "fur": "خز",
+    "wool": "پشم", "spice": "ادویه", "black_iron": "آهن سیاه",
+}
+SEPT_EXCLUDED_HOUSES = {
+    "استارک", "کارستارک", "داستین", "آمبر", "گریجوی", "هارلاو",
+    "گودبروتر", "بلکتاید", "بلک‌تاید", "بلک‌وود",
+}
+
+def _sept_faith_for_house(name):
+    normalized = str(name or "").replace("‌", "").replace(" ", "").replace("-", "").lower()
+    excluded = {x.replace("‌", "").replace(" ", "").replace("-", "").lower() for x in SEPT_EXCLUDED_HOUSES}
+    if normalized in excluded:
+        return None
+    if normalized == "تارگرین":
+        return "ایمان هفت‌گانه / آیین والریایی"
+    return "ایمان هفت‌گانه"
+
+def _sept_resource_value(resources, key):
+    if key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+        special = resources.get("specialGoods") if isinstance(resources.get("specialGoods"), dict) else {}
+        mapped = "blackIron" if key == "black_iron" else key
+        return max(0, int(special.get(mapped, 0) or 0))
+    return max(0, int(resources.get(key, 0) or 0))
+
+def _sept_set_resource(resources, key, value):
+    if key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+        special = resources.setdefault("specialGoods", {})
+        special["blackIron" if key == "black_iron" else key] = int(value)
+    else:
+        resources[key] = int(value)
+
+async def sept_overview_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    can_manage = int(player.get("telegram_id") or 0) == SEPT_ADMIN_TELEGRAM_ID
+    async with request.app["db"].acquire() as conn:
+        houses = await conn.fetch("SELECT id, name, castle FROM houses WHERE COALESCE(trim(castle),'') <> '' ORDER BY name")
+        eligible = [h for h in houses if _sept_faith_for_house(h["name"])]
+        for house in eligible:
+            await conn.execute(
+                "INSERT INTO sept_accounts (house_id) VALUES ($1) ON CONFLICT (house_id) DO NOTHING",
+                house["id"],
+            )
+        accounts = await conn.fetch("""
+            SELECT h.id AS house_id, h.name AS house_name, h.castle,
+                   a.treasury, a.inventory, a.public_satisfaction, a.public_faith
+            FROM houses h JOIN sept_accounts a ON a.house_id=h.id
+            ORDER BY h.name
+        """)
+        donations = await conn.fetch("""
+            SELECT d.id, target.name AS target_house, d.resource_key, d.amount,
+                   donor.name AS donor_house, p.username AS donor_name, d.created_at
+            FROM sept_donations d
+            JOIN houses target ON target.id=d.target_house_id
+            JOIN houses donor ON donor.id=d.donor_house_id
+            JOIN players p ON p.id=d.donor_player_id
+            ORDER BY d.created_at DESC LIMIT 30
+        """)
+        festivals = await conn.fetch("""
+            SELECT f.id, h.name AS house_name, h.castle, p.username AS officiant,
+                   f.cost, f.satisfaction_gain, f.faith_gain, f.created_at
+            FROM sept_festivals f
+            JOIN houses h ON h.id=f.house_id
+            JOIN players p ON p.id=f.created_by
+            ORDER BY f.created_at DESC LIMIT 30
+        """)
+    account_items = []
+    for row in accounts:
+        if not _sept_faith_for_house(row["house_name"]):
+            continue
+        item = dict(row)
+        item["faith"] = _sept_faith_for_house(row["house_name"])
+        item["treasury"] = int(item["treasury"] or 0)
+        item["inventory"] = _json_object(item["inventory"])
+        account_items.append(item)
+    return web.json_response({
+        "ok": True, "can_manage": can_manage,
+        "current_house_id": int(player["house_id"]) if player.get("house_id") else None,
+        "resource_labels": SEPT_RESOURCE_LABELS,
+        "resource_keys": sorted(SEPT_RESOURCE_KEYS),
+        "castles": account_items,
+        "donations": [{
+            "id": int(r["id"]), "target_house": r["target_house"],
+            "resource_key": r["resource_key"], "resource_label": SEPT_RESOURCE_LABELS.get(r["resource_key"], r["resource_key"]),
+            "amount": int(r["amount"]), "donor_house": r["donor_house"],
+            "donor_name": r["donor_name"], "created_at": r["created_at"].isoformat(),
+        } for r in donations],
+        "festivals": [{
+            "id": int(r["id"]), "house_name": r["house_name"], "castle": r["castle"],
+            "officiant": r["officiant"], "cost": _json_object(r["cost"]),
+            "satisfaction_gain": int(r["satisfaction_gain"]), "faith_gain": int(r["faith_gain"]),
+            "created_at": r["created_at"].isoformat(),
+        } for r in festivals],
+    })
+
+async def sept_donate_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    if not player.get("house_id"):
+        return json_error("house_not_assigned", 409)
+    try:
+        data = await request.json()
+        target_house_id = int(data.get("target_house_id", 0))
+        resource_key = str(data.get("resource_key", "")).strip()
+        amount = int(data.get("amount", 0))
+    except (ValueError, TypeError):
+        return json_error("invalid_donation")
+    if resource_key not in SEPT_RESOURCE_KEYS or amount < 1 or amount > 1000000:
+        return json_error("invalid_donation")
+    import json
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            target = await conn.fetchrow("SELECT id, name FROM houses WHERE id=$1", target_house_id)
+            if not target or not _sept_faith_for_house(target["name"]):
+                return json_error("sept_not_available_for_this_faith", 403)
+            donor = await conn.fetchrow(
+                "SELECT id, resources, game_state FROM houses WHERE id=$1 FOR UPDATE",
+                player["house_id"],
+            )
+            if not donor:
+                return json_error("donor_house_not_found", 404)
+            house_resources = _json_object(donor["resources"])
+            state = _json_object(donor["game_state"])
+            resources = _canonical_house_resources(house_resources, state.get("resources"))
+            available = _sept_resource_value(resources, resource_key)
+            if available < amount:
+                return json_error("not_enough_resources", 409)
+            _sept_set_resource(resources, resource_key, available - amount)
+            if resource_key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+                house_resources[resource_key] = available - amount
+            else:
+                house_resources[resource_key] = available - amount
+            state["resources"] = resources
+            await conn.execute(
+                "UPDATE houses SET resources=$1::jsonb, game_state=$2::jsonb, game_state_updated_at=NOW() WHERE id=$3",
+                json.dumps(house_resources, ensure_ascii=False),
+                json.dumps(state, ensure_ascii=False), donor["id"],
+            )
+            await conn.execute(
+                "INSERT INTO sept_accounts (house_id) VALUES ($1) ON CONFLICT (house_id) DO NOTHING",
+                target_house_id,
+            )
+            account = await conn.fetchrow("SELECT treasury, inventory FROM sept_accounts WHERE house_id=$1 FOR UPDATE", target_house_id)
+            inventory = _json_object(account["inventory"])
+            if resource_key == "coins":
+                await conn.execute(
+                    "UPDATE sept_accounts SET treasury=treasury+$1, updated_at=NOW() WHERE house_id=$2",
+                    amount, target_house_id,
+                )
+            else:
+                inventory[resource_key] = int(inventory.get(resource_key, 0) or 0) + amount
+                await conn.execute(
+                    "UPDATE sept_accounts SET inventory=$1::jsonb, updated_at=NOW() WHERE house_id=$2",
+                    json.dumps(inventory, ensure_ascii=False), target_house_id,
+                )
+            await conn.execute("""
+                INSERT INTO sept_donations
+                    (target_house_id, donor_house_id, donor_player_id, resource_key, amount)
+                VALUES ($1,$2,$3,$4,$5)
+            """, target_house_id, donor["id"], player["id"], resource_key, amount)
+    return web.json_response({"ok": True, "message": "donation_received"})
+
+async def sept_festival_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    if int(player.get("telegram_id") or 0) != SEPT_ADMIN_TELEGRAM_ID:
+        return json_error("forbidden", 403)
+    try:
+        data = await request.json()
+        target_house_id = int(data.get("target_house_id", 0))
+    except (ValueError, TypeError):
+        return json_error("invalid_festival")
+    import json
+    festival_cost = {"coins": 100, "food": 50, "wine": 2}
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            target = await conn.fetchrow(
+                "SELECT id, name, castle, game_state FROM houses WHERE id=$1 FOR UPDATE",
+                target_house_id,
+            )
+            if not target or not _sept_faith_for_house(target["name"]):
+                return json_error("sept_not_available_for_this_faith", 403)
+            await conn.execute(
+                "INSERT INTO sept_accounts (house_id) VALUES ($1) ON CONFLICT (house_id) DO NOTHING",
+                target_house_id,
+            )
+            account = await conn.fetchrow(
+                "SELECT treasury, inventory, public_satisfaction, public_faith FROM sept_accounts WHERE house_id=$1 FOR UPDATE",
+                target_house_id,
+            )
+            inventory = _json_object(account["inventory"])
+            if int(account["treasury"] or 0) < festival_cost["coins"]:
+                return json_error("sept_treasury_insufficient", 409)
+            if int(inventory.get("food", 0) or 0) < festival_cost["food"] or int(inventory.get("wine", 0) or 0) < festival_cost["wine"]:
+                return json_error("sept_stores_insufficient", 409)
+            inventory["food"] = int(inventory.get("food", 0) or 0) - festival_cost["food"]
+            inventory["wine"] = int(inventory.get("wine", 0) or 0) - festival_cost["wine"]
+            satisfaction = min(100, int(account["public_satisfaction"] or 50) + 5)
+            faith = min(100, int(account["public_faith"] or 50) + 5)
+            await conn.execute("""
+                UPDATE sept_accounts
+                SET treasury=treasury-$1, inventory=$2::jsonb,
+                    public_satisfaction=$3, public_faith=$4, updated_at=NOW()
+                WHERE house_id=$5
+            """, festival_cost["coins"], json.dumps(inventory, ensure_ascii=False),
+                satisfaction, faith, target_house_id)
+            house_state = _json_object(target["game_state"])
+            house_state["publicSatisfaction"] = satisfaction
+            house_state["publicFaith"] = faith
+            await conn.execute(
+                "UPDATE houses SET game_state=$1::jsonb, game_state_updated_at=NOW() WHERE id=$2",
+                json.dumps(house_state, ensure_ascii=False), target_house_id,
+            )
+            await conn.execute("""
+                INSERT INTO sept_festivals (house_id, created_by, cost, satisfaction_gain, faith_gain)
+                VALUES ($1,$2,$3::jsonb,5,5)
+            """, target_house_id, player["id"], json.dumps(festival_cost))
+    return web.json_response({
+        "ok": True, "message": "festival_held",
+        "cost": festival_cost, "public_satisfaction": satisfaction, "public_faith": faith,
+    })
+
 async def rumors_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -4700,6 +4930,40 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS game_rumors_created_idx ON game_rumors (created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS game_rumors_author_date_idx ON game_rumors (author_player_id, created_at DESC)")
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sept_accounts (
+                house_id BIGINT PRIMARY KEY REFERENCES houses(id) ON DELETE CASCADE,
+                treasury BIGINT NOT NULL DEFAULT 0 CHECK (treasury >= 0),
+                inventory JSONB NOT NULL DEFAULT '{}'::jsonb,
+                public_satisfaction INTEGER NOT NULL DEFAULT 50 CHECK (public_satisfaction BETWEEN 0 AND 100),
+                public_faith INTEGER NOT NULL DEFAULT 50 CHECK (public_faith BETWEEN 0 AND 100),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sept_donations (
+                id BIGSERIAL PRIMARY KEY,
+                target_house_id BIGINT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+                donor_house_id BIGINT NOT NULL REFERENCES houses(id),
+                donor_player_id BIGINT NOT NULL REFERENCES players(id),
+                resource_key VARCHAR(30) NOT NULL,
+                amount BIGINT NOT NULL CHECK (amount > 0),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS sept_donations_created_idx ON sept_donations (created_at DESC)")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sept_festivals (
+                id BIGSERIAL PRIMARY KEY,
+                house_id BIGINT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+                created_by BIGINT NOT NULL REFERENCES players(id),
+                cost JSONB NOT NULL DEFAULT '{}'::jsonb,
+                satisfaction_gain INTEGER NOT NULL DEFAULT 5,
+                faith_gain INTEGER NOT NULL DEFAULT 5,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS spy_infiltration (
                 castle_name VARCHAR(150) PRIMARY KEY,
                 level INTEGER NOT NULL DEFAULT 0 CHECK (level >= 0 AND level <= 100),
@@ -4855,6 +5119,9 @@ def create_app():
     app.router.add_get("/api/trade/contracts", trade_contracts_handler)
     app.router.add_post("/api/trade/contracts", trade_contract_create_handler)
     app.router.add_post("/api/trade/contracts/{contract_id}/respond", trade_contract_respond_handler)
+    app.router.add_get("/api/faith/septs", sept_overview_handler)
+    app.router.add_post("/api/faith/septs/donate", sept_donate_handler)
+    app.router.add_post("/api/faith/septs/festival", sept_festival_handler)
     app.router.add_get("/api/rumors", rumors_list_handler)
     app.router.add_post("/api/rumors", rumor_create_handler)
     app.router.add_get("/api/admin/rumors", admin_rumors_handler)
