@@ -31,6 +31,102 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
 .nav button.active .nav-art{transform:translateY(-2px) scale(1.06);filter:drop-shadow(0 0 7px #f2c76c99) drop-shadow(0 2px 4px #000)}
 .nav button span{font-size:9px;color:#e6d1a6;text-shadow:0 1px 3px #000}
 @media(max-width:380px){.nav button .nav-art{width:40px;height:40px}.nav button span{font-size:8px}}
+
+/* Unified royal bottom navigation */
+.nav{
+  gap:6px!important;
+  padding:9px 10px calc(9px + var(--safe-bottom))!important;
+  align-items:center!important;
+  background:linear-gradient(180deg,rgba(30,27,29,.97),rgba(8,11,17,.99))!important;
+  border-top:1px solid rgba(214,173,89,.58)!important;
+  box-shadow:0 -10px 30px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,227,160,.06)!important;
+  scrollbar-width:none!important;
+}
+.nav button,
+.nav button[data-page="dashboard"],
+.nav button[data-page="warehouse"],
+.nav button.warehouse-fixed{
+  position:relative!important;
+  inset:auto!important;
+  transform:none!important;
+  flex:0 0 74px!important;
+  width:74px!important;
+  min-width:74px!important;
+  max-width:74px!important;
+  height:68px!important;
+  min-height:68px!important;
+  align-self:center!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:4px!important;
+  padding:5px 3px!important;
+  border:1px solid rgba(190,157,99,.24)!important;
+  border-radius:15px!important;
+  background:linear-gradient(155deg,rgba(39,38,43,.94),rgba(20,22,29,.96))!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 3px 9px rgba(0,0,0,.22)!important;
+  color:#c8baa0!important;
+  opacity:1!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+  white-space:nowrap!important;
+  transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease!important;
+}
+.nav button .nav-art{
+  display:block!important;
+  width:34px!important;
+  height:34px!important;
+  max-width:34px!important;
+  max-height:34px!important;
+  object-fit:contain!important;
+  border-radius:9px!important;
+  background:rgba(8,10,15,.32)!important;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.55))!important;
+  transition:transform .18s ease,filter .18s ease!important;
+}
+.nav button .nav-emoji{
+  display:grid!important;
+  place-items:center!important;
+  width:34px!important;
+  height:34px!important;
+  font-size:25px!important;
+  line-height:1!important;
+  border-radius:9px!important;
+  background:rgba(8,10,15,.32)!important;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))!important;
+}
+.nav button span:not(.nav-emoji){
+  display:block!important;
+  max-width:100%!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  font:600 9px/1.25 Tahoma,Arial,sans-serif!important;
+  color:#d8c9aa!important;
+  text-shadow:none!important;
+}
+.nav button.active,
+.nav button[data-page="dashboard"].active,
+.nav button[data-page="warehouse"].active{
+  border-color:#e0b95f!important;
+  background:linear-gradient(155deg,rgba(116,82,37,.72),rgba(48,37,27,.98))!important;
+  color:#ffe3a0!important;
+  box-shadow:inset 0 0 0 1px rgba(255,227,160,.12),0 0 14px rgba(214,173,89,.2),0 4px 12px rgba(0,0,0,.32)!important;
+}
+.nav button.active .nav-art{transform:translateY(-1px) scale(1.06)!important;filter:drop-shadow(0 0 6px rgba(255,219,132,.5))!important}
+.nav button.active .nav-emoji{background:rgba(255,220,150,.08)!important}
+.nav button.active span:not(.nav-emoji){color:#ffe5aa!important}
+.nav button:active{transform:scale(.96)!important}
+@media(max-width:380px){
+  .nav{gap:5px!important;padding-left:7px!important;padding-right:7px!important}
+  .nav button,.nav button[data-page="dashboard"],.nav button[data-page="warehouse"],.nav button.warehouse-fixed{
+    flex-basis:68px!important;width:68px!important;min-width:68px!important;max-width:68px!important;
+    height:64px!important;min-height:64px!important;border-radius:13px!important;
+  }
+  .nav button .nav-art,.nav button .nav-emoji{width:31px!important;height:31px!important}
+  .nav button .nav-emoji{font-size:23px!important}
+  .nav button span:not(.nav-emoji){font-size:8px!important}
+}
 </style><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body>
 <div id="authGate" dir="rtl">
   <div class="auth-card">
