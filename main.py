@@ -3111,6 +3111,200 @@ async def market_cancel_listing_handler(request):
         return json_error("listing_not_found_or_not_owned", 404)
     return web.json_response({"ok": True})
 
+
+
+# --- The Twins road and caravan system ---
+TWINS_NORTH = "تویینز شمالی"
+TWINS_SOUTH = "تویینز جنوبی"
+TWINS_BRIDGE = "پل تویینز"
+
+# Fixed, server-owned road graph. The two bridge-bank nodes are connected only
+# through the bridge edge, so every route between them is detectable.
+ROAD_EDGES = [
+    ("وینترفل", "موت کیلین"), ("موت کیلین", TWINS_NORTH),
+    (TWINS_NORTH, TWINS_SOUTH), (TWINS_SOUTH, "ریوران"),
+    (TWINS_SOUTH, "سیگارد"), ("سیگارد", "ریوران"),
+    ("ریوران", "هارن‌هال"), ("هارن‌هال", "کینگزلندینگ"),
+    ("ریوران", "کسترلی راک"), ("کسترلی راک", "گلدن توث"),
+    ("کینگزلندینگ", "دراگون‌استون"), ("کینگزلندینگ", "استورمزاند"),
+    ("استورمزاند", "های‌گاردن"), ("های‌گاردن", "آشای؟"),
+    ("های‌گاردن", "اولدتاون"), ("اولدتاون", "آربور"),
+    ("استورمزاند", "سان‌اسپیر"), ("هارن‌هال", "داسکندیل"),
+    ("ریوران", "استون‌هِج"), ("سیگارد", "پایک"),
+    ("وینترفل", "گریت‌ویک"), ("وینترفل", "ده برج"),
+]
+ROAD_ALIASES = {
+    "winterfell":"وینترفل", "وینترفل":"وینترفل",
+    "moat cailin":"موت کیلین", "موت کیلین":"موت کیلین",
+    "the twins":"تویینز", "twins":"تویینز", "تویینز":"تویینز",
+    "riverrun":"ریوران", "ریوران":"ریوران",
+    "seagard":"سیگارد", "سیگارد":"سیگارد",
+    "harrenhal":"هارن‌هال", "هارن‌هال":"هارن‌هال",
+    "king's landing":"کینگزلندینگ", "kings landing":"کینگزلندینگ",
+    "کینگزلندینگ":"کینگزلندینگ",
+    "casterly rock":"کسترلی راک", "کسترلی راک":"کسترلی راک",
+    "golden tooth":"گلدن توث", "گلدن توث":"گلدن توث",
+    "dragonstone":"دراگون‌استون", "دراگون‌استون":"دراگون‌استون",
+    "storm's end":"استورمزاند", "استورمزاند":"استورمزاند",
+    "highgarden":"های‌گاردن", "های‌گاردن":"های‌گاردن",
+    "oldtown":"اولدتاون", "اولدتاون":"اولدتاون",
+    "sunspear":"سان‌اسپیر", "سان‌اسپیر":"سان‌اسپیر",
+    "pyke":"پایک", "پایک":"پایک",
+}
+def _road_key(value):
+    raw = str(value or "").strip().replace("‌", " ").lower()
+    return ROAD_ALIASES.get(raw, ROAD_ALIASES.get(raw.replace(" ", ""), raw))
+def _road_graph():
+    graph = {}
+    for left, right in ROAD_EDGES:
+        graph.setdefault(left, []).append(right)
+        graph.setdefault(right, []).append(left)
+    return graph
+def _road_find_path(origin, destination):
+    start, goal = _road_key(origin), _road_key(destination)
+    graph = _road_graph()
+    if start == "تویینز": start = TWINS_NORTH
+    if goal == "تویینز": goal = TWINS_SOUTH
+    if start not in graph or goal not in graph:
+        return None
+    queue = [(start, [start])]
+    seen = {start}
+    while queue:
+        node, path = queue.pop(0)
+        if node == goal:
+            return path
+        for nxt in graph.get(node, []):
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append((nxt, path + [nxt]))
+    return None
+def _road_uses_twins(path):
+    return bool(path and TWINS_NORTH in path and TWINS_SOUTH in path)
+
+async def twins_policy_handler(request):
+    player = await get_authenticated_player(request)
+    if not player or not player.get("is_active"):
+        return json_error("unauthorized", 401)
+    async with request.app["db"].acquire() as conn:
+        policy = await conn.fetchrow("SELECT * FROM twins_bridge_policy WHERE id=1")
+        houses = await conn.fetch("SELECT id,name FROM houses ORDER BY name")
+        rows = await conn.fetch("""
+            SELECT c.id,c.owner_house_id,h.name AS house_name,c.origin,c.destination,
+                   c.cargo,c.quantity,c.route,c.status,c.created_at,c.updated_at
+            FROM trade_caravans c JOIN houses h ON h.id=c.owner_house_id
+            ORDER BY c.created_at DESC LIMIT 100
+        """)
+    is_frey = False
+    if player.get("house_id"):
+        async with request.app["db"].acquire() as conn:
+            is_frey = bool(await conn.fetchval(
+                "SELECT lower(replace(name,'‌','')) IN ('فری','frey') FROM houses WHERE id=$1",
+                player["house_id"]))
+    blocked = set(int(x) for x in (policy["blocked_house_ids"] or [])) if policy else set()
+    items=[]
+    for row in rows:
+        item=dict(row)
+        item["route"] = _json_object(item["route"]) if isinstance(item["route"],str) else (item["route"] or [])
+        item["created_at"]=item["created_at"].isoformat()
+        item["updated_at"]=item["updated_at"].isoformat()
+        item["quantity"]=int(item["quantity"])
+        items.append(item)
+    return web.json_response({"ok":True,"is_frey":is_frey,
+        "policy":{"mode":policy["mode"] if policy else "open",
+                  "blocked_house_ids":sorted(blocked),
+                  "blocked_house_names":[h["name"] for h in houses if int(h["id"]) in blocked],
+                  "queue_rule":policy["queue_rule"] if policy else "wait"},
+        "houses":[dict(h) for h in houses],"caravans":items})
+
+async def twins_policy_update_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"): return json_error("unauthorized",401)
+    try:
+        data=await request.json()
+        mode=str(data.get("mode",""))
+        raw=data.get("blocked_house_ids",[])
+        if not isinstance(raw,list): return json_error("invalid_house_selection")
+        blocked=sorted(set(int(x) for x in raw))
+        queue_rule=str(data.get("queue_rule","wait"))
+    except (ValueError,TypeError): return json_error("invalid_policy")
+    if mode not in {"open","all","selected"} or queue_rule not in {"wait","cancel"}:
+        return json_error("invalid_policy")
+    async with request.app["db"].acquire() as conn:
+        is_frey=await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM houses WHERE id=$1 AND lower(replace(name,'‌','')) IN ('فری','frey'))",
+            player.get("house_id"))
+        if not is_frey: return json_error("frey_house_only",403)
+        if blocked:
+            count=await conn.fetchval("SELECT COUNT(*) FROM houses WHERE id=ANY($1::bigint[])",blocked)
+            if count!=len(blocked): return json_error("invalid_house_selection")
+        if mode=="all":
+            blocked=[int(r["id"]) for r in await conn.fetch("SELECT id FROM houses WHERE lower(replace(name,'‌','')) NOT IN ('فری','frey')")]
+        if mode=="open": blocked=[]
+        await conn.execute("""
+            INSERT INTO twins_bridge_policy(id,mode,blocked_house_ids,queue_rule,updated_by,updated_at)
+            VALUES(1,$1,$2::bigint[],$3,$4,NOW())
+            ON CONFLICT(id) DO UPDATE SET mode=EXCLUDED.mode,
+              blocked_house_ids=EXCLUDED.blocked_house_ids,queue_rule=EXCLUDED.queue_rule,
+              updated_by=EXCLUDED.updated_by,updated_at=NOW()
+        """,mode,blocked,queue_rule,player["id"])
+        await conn.execute("""
+            UPDATE trade_caravans SET status=CASE
+              WHEN $1='cancel' THEN 'cancelled'
+              ELSE 'waiting_bridge' END, updated_at=NOW()
+            WHERE status='waiting_bridge' AND owner_house_id=ANY($2::bigint[])
+        """,queue_rule,blocked)
+        await conn.execute("INSERT INTO audit_logs(actor_id,action,target_type,details) VALUES($1,'twins_bridge_policy','twins_bridge',$2::jsonb)",
+            player["id"],json.dumps({"mode":mode,"blocked_house_ids":blocked,"queue_rule":queue_rule}))
+    return web.json_response({"ok":True,"mode":mode,"blocked_house_ids":blocked,"queue_rule":queue_rule})
+
+async def caravan_create_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"): return json_error("unauthorized",401)
+    if not player.get("house_id"): return json_error("player_has_no_house",403)
+    try:
+        data=await request.json()
+        origin=str(data.get("origin","")).strip()
+        destination=str(data.get("destination","")).strip()
+        cargo=str(data.get("cargo","")).strip()
+        quantity=int(data.get("quantity",0))
+    except (ValueError,TypeError): return json_error("invalid_caravan")
+    if not origin or not destination or len(origin)>150 or len(destination)>150 or not cargo or len(cargo)>100 or not 1<=quantity<=1000000000:
+        return json_error("invalid_caravan")
+    path=_road_find_path(origin,destination)
+    if not path: return json_error("route_not_found_for_castles",400)
+    async with request.app["db"].acquire() as conn:
+        policy=await conn.fetchrow("SELECT mode,blocked_house_ids,queue_rule FROM twins_bridge_policy WHERE id=1")
+        crosses=_road_uses_twins(path)
+        blocked=bool(crosses and policy and (
+            policy["mode"]=="all" or int(player["house_id"]) in set(int(x) for x in (policy["blocked_house_ids"] or []))))
+        status="waiting_bridge" if blocked else "in_transit"
+        row=await conn.fetchrow("""
+            INSERT INTO trade_caravans(owner_player_id,owner_house_id,origin,destination,cargo,quantity,route,crosses_twins,status)
+            VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)
+            RETURNING id,status,crosses_twins
+        """,player["id"],player["house_id"],origin,destination,cargo,quantity,
+             json.dumps(path,ensure_ascii=False),crosses,status)
+    return web.json_response({"ok":True,"caravan":dict(row),"route":path,"crosses_twins":crosses},status=201)
+
+async def caravan_dispatch_handler(request):
+    player=await get_authenticated_player(request)
+    if not player or not player.get("is_active"): return json_error("unauthorized",401)
+    try: caravan_id=int(request.match_info["caravan_id"])
+    except (ValueError,TypeError): return json_error("invalid_caravan")
+    async with request.app["db"].acquire() as conn:
+        row=await conn.fetchrow("""
+            SELECT id,owner_house_id,status FROM trade_caravans WHERE id=$1 FOR UPDATE
+        """,caravan_id)
+        if not row or (int(row["owner_house_id"])!=int(player.get("house_id") or 0) and not player.get("is_super_admin")):
+            return json_error("caravan_not_found_or_not_owned",404)
+        if row["status"]!="waiting_bridge": return json_error("caravan_not_waiting",409)
+        policy=await conn.fetchrow("SELECT mode,blocked_house_ids FROM twins_bridge_policy WHERE id=1")
+        blocked=bool(policy and (policy["mode"]=="all" or int(row["owner_house_id"]) in set(int(x) for x in (policy["blocked_house_ids"] or []))))
+        if blocked: return json_error("bridge_still_closed",409)
+        await conn.execute("UPDATE trade_caravans SET status='in_transit',updated_at=NOW() WHERE id=$1",caravan_id)
+    return web.json_response({"ok":True,"status":"in_transit"})
+
+
 async def trade_houses_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -4942,6 +5136,36 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS market_listings_active_idx ON market_listings (status, created_at DESC)")
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS twins_bridge_policy (
+                id INTEGER PRIMARY KEY CHECK (id=1),
+                mode VARCHAR(20) NOT NULL DEFAULT 'open' CHECK(mode IN ('open','all','selected')),
+                blocked_house_ids BIGINT[] NOT NULL DEFAULT ARRAY[]::BIGINT[],
+                queue_rule VARCHAR(20) NOT NULL DEFAULT 'wait' CHECK(queue_rule IN ('wait','cancel')),
+                updated_by BIGINT REFERENCES players(id),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_caravans (
+                id BIGSERIAL PRIMARY KEY,
+                owner_player_id BIGINT NOT NULL REFERENCES players(id),
+                owner_house_id BIGINT NOT NULL REFERENCES houses(id),
+                origin VARCHAR(150) NOT NULL,
+                destination VARCHAR(150) NOT NULL,
+                cargo VARCHAR(100) NOT NULL,
+                quantity BIGINT NOT NULL CHECK(quantity>0),
+                route JSONB NOT NULL DEFAULT '[]'::jsonb,
+                crosses_twins BOOLEAN NOT NULL DEFAULT FALSE,
+                status VARCHAR(24) NOT NULL DEFAULT 'in_transit'
+                    CHECK(status IN ('in_transit','waiting_bridge','arrived','cancelled')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS trade_caravans_house_status_idx ON trade_caravans(owner_house_id,status,created_at DESC)")
+        await conn.execute("INSERT INTO twins_bridge_policy(id) VALUES(1) ON CONFLICT(id) DO NOTHING")
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS trade_contracts (
                 id BIGSERIAL PRIMARY KEY,
                 proposer_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -5174,6 +5398,10 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/house", admin_assign_house_handler)
     app.router.add_put("/api/admin/players/{player_id}/castle", admin_assign_castle_handler)
     app.router.add_post("/api/admin/players", admin_add_player_handler)
+    app.router.add_get("/api/twins/bridge", twins_policy_handler)
+    app.router.add_put("/api/twins/bridge", twins_policy_update_handler)
+    app.router.add_post("/api/trade/caravans", caravan_create_handler)
+    app.router.add_post("/api/trade/caravans/{caravan_id}/dispatch", caravan_dispatch_handler)
     app.router.add_get("/api/trade/houses", trade_houses_handler)
     app.router.add_get("/api/trade/contracts", trade_contracts_handler)
     app.router.add_post("/api/trade/contracts", trade_contract_create_handler)
