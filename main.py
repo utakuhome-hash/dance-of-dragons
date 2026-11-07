@@ -404,6 +404,11 @@ async def get_authenticated_player(request):
             """,
             token_hash,
         )
+        if row:
+            await conn.execute(
+                "UPDATE player_sessions SET last_seen_at=NOW() WHERE session_token_hash=$1",
+                token_hash,
+            )
     return dict(row) if row else None
 
 
@@ -542,8 +547,8 @@ async def auth_handler(request):
         await conn.execute(
             """
             INSERT INTO player_sessions
-                (player_id, session_token_hash, created_at, expires_at, revoked_at, ip_address, user_agent, install_id)
-            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL, $3, $4, $5)
+                (player_id, session_token_hash, created_at, expires_at, revoked_at, ip_address, user_agent, install_id, last_seen_at)
+            VALUES ($1, $2, NOW(), NOW() + INTERVAL '7 days', NULL, $3, $4, $5, NOW())
             """,
             player["id"], token_hash, ip_address, user_agent, install_id
         )
@@ -2245,6 +2250,8 @@ async def admin_players_handler(request):
                        ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
                        ls.install_id AS last_install_id,
                        ls.created_at AS last_login_at,
+                       COALESCE(ls.last_seen_at, ls.created_at) AS last_activity_at,
+                       (COALESCE(ls.last_seen_at, ls.created_at) > NOW() - INTERVAL '5 minutes') AS is_online,
                        COALESCE((SELECT COUNT(DISTINCT s2.player_id)
                                  FROM player_sessions s2
                                  WHERE s2.ip_address = ls.ip_address
@@ -2264,10 +2271,10 @@ async def admin_players_handler(request):
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
-                    SELECT ip_address, user_agent, install_id, created_at
+                    SELECT ip_address, user_agent, install_id, created_at, last_seen_at
                     FROM player_sessions s
                     WHERE s.player_id = p.id
-                    ORDER BY s.created_at DESC
+                    ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC
                     LIMIT 1
                 ) ls ON TRUE
                 WHERE p.username ILIKE $1
@@ -2287,6 +2294,8 @@ async def admin_players_handler(request):
                        ls.ip_address AS last_ip_address, ls.user_agent AS last_user_agent,
                        ls.install_id AS last_install_id,
                        ls.created_at AS last_login_at,
+                       COALESCE(ls.last_seen_at, ls.created_at) AS last_activity_at,
+                       (COALESCE(ls.last_seen_at, ls.created_at) > NOW() - INTERVAL '5 minutes') AS is_online,
                        COALESCE((SELECT COUNT(DISTINCT s2.player_id)
                                  FROM player_sessions s2
                                  WHERE s2.ip_address = ls.ip_address
@@ -2306,10 +2315,10 @@ async def admin_players_handler(request):
                 FROM players p
                 LEFT JOIN houses h ON h.id = p.house_id
                 LEFT JOIN LATERAL (
-                    SELECT ip_address, user_agent, install_id, created_at
+                    SELECT ip_address, user_agent, install_id, created_at, last_seen_at
                     FROM player_sessions s
                     WHERE s.player_id = p.id
-                    ORDER BY s.created_at DESC
+                    ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC
                     LIMIT 1
                 ) ls ON TRUE
                 ORDER BY p.id DESC
@@ -2322,8 +2331,9 @@ async def admin_players_handler(request):
     players = []
     for row in rows:
         item = dict(row)
-        if item.get("last_login_at") is not None:
-            item["last_login_at"] = item["last_login_at"].isoformat()
+        for field in ("last_login_at", "last_activity_at"):
+            if item.get(field) is not None:
+                item[field] = item[field].isoformat()
         players.append(item)
     return web.json_response({
         "ok": True,
@@ -4369,6 +4379,8 @@ async def on_startup(app):
         await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64)")
         await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT")
         await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS install_id VARCHAR(80)")
+        await conn.execute("ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ")
+        await conn.execute("UPDATE player_sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_install_created_idx ON player_sessions (install_id, created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_player_idx ON player_sessions (player_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS player_sessions_ip_created_idx ON player_sessions (ip_address, created_at DESC)")
