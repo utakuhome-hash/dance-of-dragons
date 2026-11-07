@@ -2925,16 +2925,19 @@ async def espionage_overview_handler(request):
         )
         letters = await conn.fetch(
             """
-            SELECT DISTINCT ON (l.id)
-                   l.id, l.subject, l.created_at,
-                   sender.username AS sender_name,
-                   recipient.username AS recipient_name
-            FROM spy_tracked_letters t
-            JOIN game_letters l ON l.id = t.letter_id
-            JOIN players sender ON sender.id = l.sender_player_id
-            JOIN players recipient ON recipient.id = l.recipient_player_id
-            WHERE l.is_anonymous = FALSE
-            ORDER BY l.id, t.detected_at DESC
+            SELECT * FROM (
+                SELECT DISTINCT ON (l.id)
+                       l.id, l.subject, l.created_at,
+                       sender.username AS sender_name,
+                       recipient.username AS recipient_name
+                FROM spy_tracked_letters t
+                JOIN game_letters l ON l.id = t.letter_id
+                JOIN players sender ON sender.id = l.sender_player_id
+                JOIN players recipient ON recipient.id = l.recipient_player_id
+                WHERE l.is_anonymous = FALSE
+                ORDER BY l.id, t.detected_at DESC
+            ) tracked
+            ORDER BY created_at DESC
             LIMIT 100
             """
         )
