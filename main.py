@@ -1602,6 +1602,7 @@ async def marriage_ceremony_handler(request):
             if marriage["ceremony_level"]:
                 return json_error("ceremony_already_chosen")
             groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",marriage["groom_player_id"])
+            bride_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",marriage["bride_player_id"])
             if not groom_house_id:
                 return json_error("groom_has_no_house")
             house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",groom_house_id)
@@ -1626,14 +1627,27 @@ async def marriage_ceremony_handler(request):
             }
             state=_json_object(house["game_state"])
             state["resources"]=resources
-            state["publicSatisfactionBonus"]=ceremony["bonus"]
-            state["publicSatisfactionBonusExpiresAt"]=(await conn.fetchval(
+            bonus_expires=await conn.fetchval(
                 "SELECT (NOW()+($1::text || ' days')::interval)",ceremony["days"]
-            )).isoformat()
+            )
+            state["publicSatisfactionBonus"]=ceremony["bonus"]
+            state["publicSatisfactionBonusExpiresAt"]=bonus_expires.isoformat()
             await conn.execute("""
                 UPDATE houses SET resources=$1::jsonb,game_state=$2::jsonb,game_state_updated_at=NOW()
                 WHERE id=$3
             """,json.dumps(house_resources,ensure_ascii=False),json.dumps(state,ensure_ascii=False),groom_house_id)
+            if bride_house_id and int(bride_house_id)!=int(groom_house_id):
+                bride_state_row=await conn.fetchrow(
+                    "SELECT game_state FROM houses WHERE id=$1 FOR UPDATE",bride_house_id
+                )
+                if bride_state_row:
+                    bride_state=_json_object(bride_state_row["game_state"])
+                    bride_state["publicSatisfactionBonus"]=ceremony["bonus"]
+                    bride_state["publicSatisfactionBonusExpiresAt"]=bonus_expires.isoformat()
+                    await conn.execute(
+                        "UPDATE houses SET game_state=$1::jsonb,game_state_updated_at=NOW() WHERE id=$2",
+                        json.dumps(bride_state,ensure_ascii=False),bride_house_id
+                    )
             await conn.execute("""
                 UPDATE marriages SET ceremony_level=$1,ceremony_at=NOW(),
                     satisfaction_bonus=$2,
@@ -1723,6 +1737,12 @@ async def wedding_gift_handler(request):
             groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",invite["groom_player_id"])
             if not groom_house_id:
                 return json_error("groom_has_no_house")
+            if int(player["house_id"])==int(groom_house_id):
+                await conn.execute(
+                    "INSERT INTO wedding_gifts (invitation_id,sender_player_id,item_name,quantity) VALUES ($1,$2,$3,$4)",
+                    invitation_id,player["id"],item,quantity
+                )
+                return web.json_response({"ok":True,"message":"gift_recorded_within_same_house"})
             guest_house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",player["house_id"])
             target_house=await conn.fetchrow("SELECT resources,game_state FROM houses WHERE id=$1 FOR UPDATE",groom_house_id)
             if not guest_house or not target_house:
