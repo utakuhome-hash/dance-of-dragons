@@ -2958,7 +2958,7 @@ async def mail_send_handler(request):
         return json_error("cannot_message_self")
     async with request.app["db"].acquire() as conn:
         recipient = await conn.fetchrow(
-            "SELECT id FROM players WHERE id = $1 AND is_active = TRUE",
+            "SELECT id, telegram_id FROM players WHERE id = $1 AND is_active = TRUE",
             recipient_id,
         )
         if not recipient:
@@ -2975,7 +2975,42 @@ async def mail_send_handler(request):
     letter = dict(row)
     if letter.get("created_at") is not None:
         letter["created_at"] = letter["created_at"].isoformat()
-    return web.json_response({"ok": True, "letter": letter}, status=201)
+
+    # Telegram notifications are best-effort: the letter remains delivered in-game
+    # even if the recipient has not started the bot or Telegram is temporarily unavailable.
+    telegram_notification_sent = False
+    recipient_telegram_id = recipient["telegram_id"]
+    if recipient_telegram_id:
+        sender_label = "یک فرستنده ناشناس" if is_anonymous else str(player["username"])
+        notification_text = (
+            f"✉️ نامه تازه‌ای دریافت کردی!\\n\\n"
+            f"از طرف «{sender_label}» برایت نامه ارسال شده است.\\n"
+            f"برای خواندن نامه وارد بازی شو و بخش «نامه‌ها» را باز کن."
+        )
+        notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="📬 مشاهده نامه‌ها",
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261106m"),
+            )
+        ]])
+        try:
+            await bot.send_message(
+                chat_id=int(recipient_telegram_id),
+                text=notification_text,
+                reply_markup=notification_keyboard,
+            )
+            telegram_notification_sent = True
+        except Exception:
+            logging.exception(
+                "Could not send Telegram new-letter notification for letter_id=%s recipient_player_id=%s",
+                row["id"], recipient_id,
+            )
+
+    return web.json_response({
+        "ok": True,
+        "letter": letter,
+        "telegram_notification_sent": telegram_notification_sent,
+    }, status=201)
 
 
 async def mail_read_handler(request):
