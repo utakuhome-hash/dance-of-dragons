@@ -1388,17 +1388,23 @@ async def marriage_handler(request):
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
     async with request.app["db"].acquire() as conn:
+        # Some existing game accounts are linked to their character by an exact
+        # character-name/username match rather than owner_player_id. Include that
+        # legacy ownership form in both lists so the selectors are not empty.
         own = await conn.fetch("""
             SELECT cp.id, cp.character_name, cp.gender, cp.spouse
             FROM character_profiles cp
             WHERE cp.owner_player_id=$1
+               OR (cp.owner_player_id IS NULL AND LOWER(BTRIM(cp.character_name))=LOWER(BTRIM($2)))
             ORDER BY cp.character_name
-        """, player["id"])
+        """, player["id"], player["username"])
         available = await conn.fetch("""
-            SELECT cp.id, cp.character_name, cp.house, p.id AS player_id,
-                   p.username AS player_name, h.name AS house_name
+            SELECT cp.id, cp.character_name, cp.gender, cp.house,
+                   p.id AS player_id, p.username AS player_name, h.name AS house_name
             FROM character_profiles cp
-            JOIN players p ON p.id=cp.owner_player_id AND p.is_active=TRUE
+            JOIN players p ON p.is_active=TRUE
+              AND (cp.owner_player_id=p.id OR
+                   (cp.owner_player_id IS NULL AND LOWER(BTRIM(cp.character_name))=LOWER(BTRIM(p.username))))
             LEFT JOIN houses h ON h.id=p.house_id
             WHERE cp.gender='female' AND p.id<>$1
               AND COALESCE(cp.spouse,'') IN ('','هنوز ازدواج نکرده','نیازمند تعیین','ثبت نشده')
@@ -1514,14 +1520,29 @@ async def marriage_proposal_create_handler(request):
                 SELECT id,owner_player_id,character_name,gender,spouse
                 FROM character_profiles WHERE id=$1 FOR UPDATE
             """,bride_id)
-            if not groom or groom["owner_player_id"]!=player["id"]:
+            groom_is_owned = bool(groom and (
+                groom["owner_player_id"]==player["id"] or
+                (groom["owner_player_id"] is None and
+                 str(groom["character_name"]).strip().casefold()==str(player["username"]).strip().casefold())
+            ))
+            if not groom or not groom_is_owned:
                 return json_error("groom_not_owned",403)
             if not bride or bride["gender"]!="female" or groom["gender"]!="male":
                 return json_error("male_to_female_only",403)
-            if bride["owner_player_id"]==player["id"]:
+            if bride["owner_player_id"]==player["id"] or (
+                bride["owner_player_id"] is None and
+                str(bride["character_name"]).strip().casefold()==str(player["username"]).strip().casefold()
+            ):
                 return json_error("cannot_propose_to_self")
-            if not bride["owner_player_id"] or not await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride["owner_player_id"]
+            bride_player_id = bride["owner_player_id"]
+            if bride_player_id is None:
+                bride_player_id = await conn.fetchval("""
+                    SELECT id FROM players
+                    WHERE is_active=TRUE AND LOWER(BTRIM(username))=LOWER(BTRIM($1))
+                    LIMIT 1
+                """, bride["character_name"])
+            if not bride_player_id or not await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride_player_id
             ):
                 return json_error("bride_unavailable")
             if str(groom["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده") or str(bride["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده"):
@@ -1541,7 +1562,7 @@ async def marriage_proposal_create_handler(request):
                 INSERT INTO marriage_proposals
                     (groom_player_id,bride_player_id,groom_profile_id,bride_profile_id)
                 VALUES ($1,$2,$3,$4) RETURNING id
-            """,player["id"],bride["owner_player_id"],groom_id,bride_id)
+            """,player["id"],bride_player_id,groom_id,bride_id)
     return web.json_response({"ok":True,"proposal_id":int(row["id"])})
 
 
