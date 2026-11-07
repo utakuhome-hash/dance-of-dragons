@@ -3260,7 +3260,7 @@ async def twins_policy_update_handler(request):
             count=await conn.fetchval("SELECT COUNT(*) FROM houses WHERE id=ANY($1::bigint[])",blocked)
             if count!=len(blocked): return json_error("invalid_house_selection")
         if mode=="all":
-            blocked=[int(r["id"]) for r in await conn.fetch("SELECT id FROM houses WHERE lower(replace(name,'‌','')) NOT IN ('فری','frey')")]
+            blocked=[int(r["id"]) for r in await conn.fetch("SELECT id FROM houses")]
         if mode=="open": blocked=[]
         await conn.execute("""
             INSERT INTO twins_bridge_policy(id,mode,blocked_house_ids,queue_rule,updated_by,updated_at)
