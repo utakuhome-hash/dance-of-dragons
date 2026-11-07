@@ -3858,7 +3858,10 @@ async def on_startup(app):
             'sabitha frey','black aly blackwood','netties',
             'florence fossoway','elinda massey','lady sam',
             'marilda of hull','aemma arryn','ysilla royce',
-            'cassella vaith','nymeria sand','tyene sand'
+            'cassella vaith','nymeria sand','tyene sand',
+            'tansy tully','sara snow','alys karstark','johanna lannister',
+            'jancia fossoway','cassandra baratheon','aliandra martell',
+            'coryanne martell','delonne allyrion'
         ])
         await conn.execute("""
             UPDATE character_profiles SET gender='male', updated_at=NOW()
@@ -3877,7 +3880,17 @@ async def on_startup(app):
             'elmo tully','benjicot blackwood','samwell blackwood',
             'lorent marbrand','garmund hightower','hobert hightower',
             'lord beesbury','lyman beesbury','jason lannister',
-            'tyland lannister','addam of hull','qarlo'
+            'tyland lannister','addam of hull','qarlo',
+            'ormund hightower','jon roxton','gwayne hightower',
+            'kermit tully','amos bracken','forrest frey','cregan stark',
+            'rickon stark','benjen stark','harmond umber','roderick dustin',
+            'loreon lannister','clarrent crakehall','humphrey lefford',
+            'lyonel tyrell','loras tyrell','leo tyrell','alan tarly',
+            'garth redwyne','royce baratheon','royce caron','byron swann',
+            'willis fell','arnold arryn','joffrey arryn','yorbert royce',
+            'leowyn corbray','qoren martell','anders yronwood',
+            'franklyn fowler','edric dayne','dalton greyjoy','veron greyjoy',
+            'harras harlaw','lorren blacktyde','gorold goodbrother'
         ])
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS marriage_proposals (
