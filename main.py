@@ -3076,13 +3076,20 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
     special = resources.setdefault("specialGoods", {})
     buildings = state.setdefault("buildings", {})
     standard = [
-        ("ماهیگیری", "food", 8, 1), ("مزرعه", "food", 12, 1),
-        ("چوب‌بری", "wood", 14, 2), ("معدن سنگ", "stone", 8, 3),
-        ("معدن آهن", "iron", 5, 4), ("بازار", "coins", 500, 2),
-        ("شهر", "subjects", 3, 5),
+        ("ماهیگیری", "food", 8), ("مزرعه", "food", 12),
+        ("چوب‌بری", "wood", 14), ("معدن سنگ", "stone", 8),
+        ("معدن آهن", "iron", 5), ("بازار", "coins", 500),
+        ("شهر", "subjects", 3),
     ]
     totals = {}
-    upkeep = 0
+    # Food is consumed only by the population and soldiers, never by buildings.
+    subjects = max(0, int(resources.get("subjects", 0) or 0))
+    troops = state.get("troops")
+    if isinstance(troops, list):
+        soldiers = sum(max(0, int(t.get("count", 0) or 0)) for t in troops if isinstance(t, dict))
+    else:
+        soldiers = max(0, int(state.get("army", 0) or 0))
+    upkeep = ((subjects + 9) // 10 + (soldiers + 9) // 10) * elapsed
     regional_bonus = {
         "west": {"coins": 1.5},
         "reach": {"food": 1.5},
@@ -3094,11 +3101,10 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
         # Dorne's fishery is its signature food source.
         "dorne": {"fishery": 2.0},
     }.get(special_region, {})
-    for name, key, base, food_cost in standard:
+    for name, key, base in standard:
         level = _level(buildings, name)
         multiplier = regional_bonus.get("fishery", 1.0) if name == "ماهیگیری" else regional_bonus.get(key, 1.0)
         totals[key] = totals.get(key, 0) + int(level * base * multiplier) * elapsed
-        upkeep += level * food_cost * elapsed
     special_buildings = [
         ("north", "شکارگاه", "fur", [60,105,165,240,330]),
         ("vale", "دامداری پشمی", "wool", [90,165,255,375,525]),
