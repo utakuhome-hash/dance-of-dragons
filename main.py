@@ -3130,7 +3130,7 @@ ROAD_EDGES = [
     ("استورمزاند", "های‌گاردن"), ("های‌گاردن", "اولدتاون"),
     ("اولدتاون", "آربور"), ("استورمزاند", "سان‌اسپیر"),
     ("هارن‌هال", "داسکندیل"), ("ریوران", "استون‌هِج"),
-    ("سیگارد", "پایک"), ("وینترفل", "گریت‌ویک"),
+    ("سیگارد", "پایک"), ("پایک", "بلک‌تاید"), ("سیگارد", "فل‌وود هال"), ("وینترفل", "گریت‌ویک"),
     ("وینترفل", "ده برج"), ("وینترفل", "لست هرت"),
     ("وینترفل", "باروتون"), ("لست هرت", "کارهولد"),
     ("کارهولد", "وینترفل"), ("گریت‌ویک", "ده برج"),
@@ -3186,10 +3186,26 @@ def _road_graph():
 def _road_find_path(origin, destination):
     start, goal = _road_key(origin), _road_key(destination)
     graph = _road_graph()
-    if start == "تویینز": start = TWINS_NORTH
-    if goal == "تویینز": goal = TWINS_SOUTH
     if start not in graph or goal not in graph:
         return None
+    if start == "تویینز" or goal == "تویینز":
+        # The Twins is a destination on either bank; arriving at the castle
+        # itself must not be mistaken for crossing the bridge.
+        side_graph = {node: [n for n in neighbors if {node, n} != {TWINS_NORTH, TWINS_SOUTH}]
+                      for node, neighbors in graph.items()}
+        def north_side(node):
+            seen, pending = {TWINS_NORTH}, [TWINS_NORTH]
+            while pending:
+                current = pending.pop()
+                for nxt in side_graph.get(current, []):
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        pending.append(nxt)
+            return node in seen
+        if start == "تویینز":
+            start = TWINS_NORTH if north_side(goal) else TWINS_SOUTH
+        if goal == "تویینز":
+            goal = TWINS_NORTH if north_side(start) else TWINS_SOUTH
     queue = [(start, [start])]
     seen = {start}
     while queue:
