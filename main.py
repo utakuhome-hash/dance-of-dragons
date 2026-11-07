@@ -4031,6 +4031,52 @@ async def on_startup(app):
                         dragon = COALESCE(character_profiles.dragon, EXCLUDED.dragon),
                         house = COALESCE(character_profiles.house, EXCLUDED.house)
                 """, character_name, castle_name)
+        # Canonical gender tags for the named characters in the current roster.
+        await conn.execute("""
+            UPDATE character_profiles SET gender='female', updated_at=NOW()
+            WHERE lower(character_name) = ANY($1::text[])
+        """, [
+            'helaena targaryen','alicent hightower','rhaenyra targaryen',
+            'rhaenys targaryen','baela targaryen','rhaena targaryen',
+            'mysaria','laena velaryon','jeyne arryn','alys rivers',
+            'sabitha frey','black aly blackwood','netties',
+            'florence fossoway','elinda massey','lady sam',
+            'marilda of hull','aemma arryn','ysilla royce',
+            'cassella vaith','nymeria sand','tyene sand',
+            'tansy tully','sara snow','alys karstark','johanna lannister',
+            'jancia fossoway','cassandra baratheon','aliandra martell',
+            'coryanne martell','delonne allyrion'
+        ])
+        await conn.execute("""
+            UPDATE character_profiles SET gender='male', updated_at=NOW()
+            WHERE gender='unknown' AND lower(character_name) = ANY($1::text[])
+        """, [
+            'aegon ii targaryen','aemond targaryen','daeron targaryen',
+            'alf white','ulf white','daemon targaryen','jacaerys velaryon',
+            'hugh hammer','corlys velaryon','adam velaryon','addam velaryon',
+            'alyn velaryon','bartimos celtigar','lord reynald darklyn','ynald darklyn',
+            'criston cole','arryk cargyll','erryk cargyll','ser luthor largent',
+            'lorent marbrand','willam royce','steffon darklyn',
+            'otto hightower','gwayne hightower','orwyle','tyland lannister',
+            'jasper wylde','borros baratheon','cregan stark','jacaerys velaryon',
+            'robert arryn','gerold royce','harrold westerling',
+            'hugh of the vale','oscar tully','grover tully','edmure tully',
+            'elmo tully','benjicot blackwood','samwell blackwood',
+            'lorent marbrand','garmund hightower','hobert hightower',
+            'lord beesbury','lyman beesbury','jason lannister',
+            'tyland lannister','addam of hull','qarlo',
+            'ormund hightower','jon roxton','gwayne hightower',
+            'kermit tully','amos bracken','forrest frey','cregan stark',
+            'rickon stark','benjen stark','harmond umber','roderick dustin',
+            'loreon lannister','clarrent crakehall','humphrey lefford',
+            'lyonel tyrell','loras tyrell','leo tyrell','alan tarly',
+            'garth redwyne','royce baratheon','royce caron','byron swann',
+            'willis fell','arnold arryn','joffrey arryn','yorbert royce',
+            'leowyn corbray','qoren martell','anders yronwood',
+            'franklyn fowler','edric dayne','dalton greyjoy','veron greyjoy',
+            'harras harlaw','lorren blacktyde','gorold goodbrother'
+        ])
+
         # These four characters are not married in the current game timeline.
         # Keep both sides of each pair explicitly unmarried in their public profiles.
         await conn.execute("""
