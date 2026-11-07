@@ -391,6 +391,11 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
  <p style="font-size:12px;color:#c9bda7;line-height:1.8">در این بخش نویسندهٔ هر شایعه فقط برای سوپرادمین نمایش داده می‌شود؛ در صفحهٔ عمومی نامی از نویسنده نیست.</p>
  <button type="button" id="refreshAdminRumors">به‌روزرسانی شایعات</button>
  <div id="adminRumorsList">برای مشاهده، فهرست را به‌روزرسانی کن.</div>
+ <hr><h3>✉️ دفتر همهٔ نامه‌ها</h3>
+ <p style="font-size:12px;color:#c9bda7;line-height:1.8">فقط سوپرادمین می‌تواند نامه‌های ارسالی و دریافتی را بررسی کند. در نامه‌های ناشناس، هویت فرستنده فقط در این بخش محرمانهٔ مدیریت نمایش داده می‌شود.</p>
+ <button type="button" id="refreshAdminMail">دریافت و بررسی همهٔ نامه‌ها</button>
+ <input id="adminMailSearch" type="search" placeholder="جست‌وجوی موضوع، متن یا نام بازیکن" style="width:100%;box-sizing:border-box;margin:8px 0;padding:10px;border-radius:8px;border:1px solid #665237;background:#14110e;color:#f1e6cf">
+ <div id="adminMailList">برای مشاهده، فهرست نامه‌ها را به‌روزرسانی کن.</div>
  <div id="loginRequestsList">در حال دریافت…</div>
  </div>
 </div>
@@ -733,6 +738,40 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    });
   }catch(e){list.textContent='دریافت دفتر شایعات ناموفق بود: '+e.message;}
  }
+
+ let adminMailCache=[];
+ function renderAdminMail(){
+  const list=document.getElementById('adminMailList');if(!list)return;
+  const query=(document.getElementById('adminMailSearch')?.value||'').trim().toLocaleLowerCase();
+  const rows=adminMailCache.filter(m=>[m.subject,m.body,m.sender_username,m.recipient_username,m.sender_telegram_id,m.recipient_telegram_id].some(v=>String(v??'').toLocaleLowerCase().includes(query)));
+  list.replaceChildren();
+  const count=document.createElement('div');count.style.cssText='color:#d9c69f;font-size:12px;margin:8px 0';count.textContent='نمایش '+rows.length+' نامه از '+adminMailCache.length+' نامهٔ دریافت‌شده از سرور';list.append(count);
+  if(!rows.length){const empty=document.createElement('p');empty.textContent='نامه‌ای با این جست‌وجو پیدا نشد.';list.append(empty);return;}
+  rows.forEach(m=>{
+   const card=document.createElement('article');card.style.cssText='border:1px solid #80643c;border-radius:10px;padding:11px;margin:9px 0;background:#17140f;overflow-wrap:anywhere';
+   const title=document.createElement('strong');title.textContent='#'+m.id+' · '+(m.subject||'بدون موضوع')+(m.is_anonymous?' · نامهٔ ناشناس':'');
+   const meta=document.createElement('div');meta.style.cssText='font-size:11px;line-height:1.9;color:#c9bda7;margin-top:6px';
+   meta.textContent='فرستنده: '+(m.sender_username||'نامشخص')+' (حساب '+m.sender_player_id+', Telegram '+(m.sender_telegram_id||'ثبت‌نشده')+') · گیرنده: '+(m.recipient_username||'نامشخص')+' (حساب '+m.recipient_player_id+')';
+   const date=document.createElement('div');date.style.cssText='font-size:11px;color:#bba77f;margin-top:4px';
+   date.textContent='تاریخ: '+(m.created_at?new Date(m.created_at).toLocaleString('fa-IR'):'نامشخص')+' · '+(m.read_at?'خوانده‌شده':'خوانده‌نشده')+' · دسته: '+(m.category||'عمومی');
+   const body=document.createElement('p');body.style.cssText='white-space:pre-wrap;line-height:1.9;margin:9px 0 0;color:#f1e6cf';body.textContent=m.body||'';
+   card.append(title,meta,date,body);list.append(card);
+  });
+ }
+ async function loadAdminMail(){
+  const list=document.getElementById('adminMailList');if(!list)return;
+  list.textContent='در حال دریافت همهٔ نامه‌ها…';
+  const button=document.getElementById('refreshAdminMail');if(button)button.disabled=true;
+  try{
+   const data=await api('/api/admin/mail?limit=300');
+   adminMailCache=Array.isArray(data.letters)?data.letters:[];
+   renderAdminMail();
+  }catch(e){list.textContent='دریافت نامه‌ها ناموفق بود: '+e.message;}
+  finally{if(button)button.disabled=false;}
+ }
+ document.getElementById('refreshAdminMail')?.addEventListener('click',loadAdminMail);
+ document.getElementById('adminMailSearch')?.addEventListener('input',renderAdminMail);
+
  document.getElementById('refreshAdminRumors')?.addEventListener('click',loadRumorsAdmin);
  async function loadMilitaryCampaigns(){
   const list=document.getElementById('adminMilitaryCampaigns');if(!list)return;
