@@ -3372,10 +3372,13 @@ async def admin_mail_letters_handler(request):
     if error:
         return error
     try:
-        limit = min(500, max(1, int(request.query.get("limit", "300"))))
+        page = max(1, int(request.query.get("page", "1")))
+        limit = min(500, max(1, int(request.query.get("limit", "200"))))
     except ValueError:
         return json_error("invalid_pagination")
+    offset = (page - 1) * limit
     async with request.app["db"].acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM game_letters")
         rows = await conn.fetch(
             """
             SELECT l.id, l.subject, l.body, l.category, l.is_anonymous,
@@ -3390,9 +3393,9 @@ async def admin_mail_letters_handler(request):
             JOIN players sender ON sender.id = l.sender_player_id
             JOIN players recipient ON recipient.id = l.recipient_player_id
             ORDER BY l.created_at DESC, l.id DESC
-            LIMIT $1
+            LIMIT $1 OFFSET $2
             """,
-            limit,
+            limit, offset,
         )
     letters = []
     for row in rows:
@@ -3404,7 +3407,11 @@ async def admin_mail_letters_handler(request):
         item["sender_player_id"] = int(item["sender_player_id"])
         item["recipient_player_id"] = int(item["recipient_player_id"])
         letters.append(item)
-    return web.json_response({"ok": True, "letters": letters, "count": len(letters)})
+    return web.json_response({
+        "ok": True, "letters": letters, "count": len(letters),
+        "total": int(total or 0), "page": page,
+        "pages": max(1, (int(total or 0) + limit - 1) // limit),
+    })
 
 
 async def mail_list_handler(request):
