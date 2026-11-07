@@ -194,6 +194,14 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
 .auth-card button,.dod-modal button[type=submit]{border:1px solid #d5ae62;background:linear-gradient(#8b6734,#49321b);color:#fff0c8;border-radius:10px;padding:11px 18px;font:bold 14px Tahoma}
 .account-strip{margin-right:auto;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font:11px Tahoma;color:#f3d99f}
 .account-strip button{border:1px solid #94713e;background:#382b1c;color:#ffe8b3;border-radius:8px;padding:7px 9px;font:11px Tahoma}
+.player-profile{display:flex;align-items:center;gap:9px;min-width:0;margin-left:auto;direction:rtl}
+.player-avatar{width:46px;height:46px;flex:0 0 46px;display:grid;place-items:center;border-radius:50%;border:2px solid #e4c477;background:radial-gradient(circle at 35% 25%,#80613a,#211811 72%);box-shadow:0 0 12px #d6ad5944,inset 0 0 0 2px #241a10;color:#ffe3a0;font:24px Tahoma}
+.player-profile-meta{display:flex;flex-direction:column;gap:4px;min-width:0}
+.player-profile-name{font:bold 12px Tahoma;color:#ffe3a0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.player-profile-faith{font:10px Tahoma;color:#c9bda7;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-strip{margin-right:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+@media(max-width:380px){.player-avatar{width:40px;height:40px;flex-basis:40px;font-size:21px}.player-profile-name{max-width:112px}.player-profile-faith{max-width:120px}}
+
 .dod-modal{position:fixed;inset:0;z-index:100000;background:#000c;display:grid;place-items:center;padding:16px;font-family:Tahoma;color:#f5eddf}
 .dod-modal-card{position:relative;width:min(100%,440px);max-height:88dvh;overflow:auto;background:#1d1914;border:1px solid #a17a3e;border-radius:16px;padding:22px}
 .dod-modal-card h2,.dod-modal-card h3{color:#f4d998}.dod-modal-card label{display:block;margin:12px 0 6px}
@@ -270,14 +278,30 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   syncSharedGameState(player);
   const mast=shell.querySelector('.mast');
   if(mast){
+   const faithForHouse=name=>{
+    const h=String(name||'').toLowerCase().replace(/[\\s‌_-]/g,'');
+    if(/greyjoy|گریجوی|هارلاو|گودبروتر|بلک.?تاید|وینچ|بوتلی/.test(h))return 'خدای مغروق';
+    if(/stark|استارک|آمبر|umber|بولتون|bolton|کارستارک|karstark|مورمونت|mormont|گلوور|glover|رید|reed|هورن.?وود|hornwood|داستین|dustin/.test(h))return 'خدایان کهن';
+    if(/blackwood|بلک.?وود/.test(h))return 'خدایان کهن';
+    if(/manderly|ماندرلی/.test(h))return 'ایمان هفت‌گانه';
+    if(/targaryen|تارگرین/.test(h))return 'آیین والریایی / ایمان هفت‌گانه';
+    if(/rhllor|r.?hllor|خداینور/.test(h))return 'خدای نور';
+    return player.house_name?'ایمان هفت‌گانه':'دین ثبت نشده';
+   };
+   const sigils=[[/stark|استارک|کارستارک|آمبر|بولتون/,'🐺'],[/lannister|لنیستر|کراکهال/,'🦁'],[/targaryen|تارگرین/,'🐉'],[/greyjoy|گریجوی|هارلاو/,'🦑'],[/arryn|آرین|رویس/,'🦅'],[/baratheon|براتیون|سوان|کارون/,'🦌'],[/tyrell|تایرل|ردواین|های.?تاور/,'🌹'],[/martell|مارتل|دین|یرونوود/,'☀️'],[/tully|تالی|فری|برکن|بلک.?وود/,'🐟']];
+   const houseName=String(player.house_name||'');
+   const sigil=(sigils.find(([re])=>re.test(houseName))||[])[1]||'👤';
+   let profile=document.getElementById('dodPlayerProfile');
+   if(!profile){profile=document.createElement('div');profile.id='dodPlayerProfile';profile.className='player-profile';mast.insertBefore(profile,mast.firstChild);}
+   profile.replaceChildren();
+   const avatar=document.createElement('div');avatar.className='player-avatar';avatar.setAttribute('aria-label','تصویر پروفایل');avatar.textContent=sigil;
+   const meta=document.createElement('div');meta.className='player-profile-meta';
+   const name=document.createElement('div');name.className='player-profile-name';name.textContent=player.username||'بازیکن';
+   const faith=document.createElement('div');faith.className='player-profile-faith';faith.textContent='دین: '+faithForHouse(houseName);
+   meta.append(name,faith);profile.append(avatar,meta);
    let bar=document.getElementById('dodAccountStrip');
    if(!bar){bar=document.createElement('div');bar.id='dodAccountStrip';bar.className='account-strip';}
    bar.replaceChildren();
-   const label=document.createElement('span');
-   label.textContent='شخصیت: '+(player.username||'بازیکن');
-   const house=document.createElement('span');
-   house.textContent=player.house_name?'خاندان: '+player.house_name:'خاندان ثبت نشده است';
-   bar.append(label,house);
    if(player.is_super_admin){
     const clockBtn=document.createElement('button');clockBtn.id='quickGameClock';clockBtn.textContent='ساعت بازی…';clockBtn.onclick=()=>quickGameClock(clockBtn);bar.append(clockBtn);
     const b=document.createElement('button');b.textContent='مدیریت بازیکن‌ها';b.onclick=adminOpen;bar.append(b);
