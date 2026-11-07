@@ -1461,7 +1461,7 @@ async def marriage_handler(request):
             ORDER BY wi.created_at DESC LIMIT 100
         """, player["id"])
     def iso(row, key):
-        value=row.get(key)
+        value=row[key]
         return value.isoformat() if value else None
     def clean(row, dates=()):
         item=dict(row)
