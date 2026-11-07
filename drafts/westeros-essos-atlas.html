@@ -1,148 +1,37 @@
-<!doctype html>
-<html lang="fa" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>نقشه جهان شناخته‌شده | وستروس و اسوس</title>
-<style>
-:root{--ink:#302719;--paper:#ead9ae;--sea:#a9c4bd;--gold:#9a7138}
-*{box-sizing:border-box}body{margin:0;background:#211f1a;color:#f2e6c9;font-family:Tahoma,"Segoe UI",sans-serif}
-header{padding:18px 22px 12px;text-align:center}h1{margin:0;font-family:Georgia,serif;letter-spacing:2px;font-size:clamp(22px,4vw,38px);color:#e9d6a8}
-header p{margin:8px 0 0;color:#c9b990;font-size:13px}
-.toolbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:0 12px 14px}
-button{border:1px solid #9b8257;background:#403727;color:#f4e5c1;padding:9px 14px;border-radius:20px;cursor:pointer;font:inherit;font-size:12px}
-button.active{background:#b28a4b;color:#201a11;border-color:#e4c98c}
-.frame{max-width:1500px;margin:0 auto 22px;padding:0 12px}
-.mapwrap{overflow:hidden;border:8px solid #55452e;border-radius:8px;background:#b5c8bd;box-shadow:0 18px 60px #0009}
-svg{display:block;width:100%;height:auto;touch-action:pan-x pan-y}
-.land{fill:#dfc99a;stroke:#786343;stroke-width:4;stroke-linejoin:round}
-.land2{fill:#d6c08d;stroke:#786343;stroke-width:4;stroke-linejoin:round}
-.island{fill:#ddc794;stroke:#786343;stroke-width:2}
-.coastline{fill:none;stroke:#f0dfb8;stroke-width:2;opacity:.85}
-.region{font: bold 22px Georgia,serif;letter-spacing:2px;fill:#786343;opacity:.82;text-anchor:middle}
-.smallregion{font:italic 15px Georgia,serif;fill:#88734f;text-anchor:middle}
-.sealabel{font:italic 23px Georgia,serif;fill:#557b79;letter-spacing:2px;text-anchor:middle}
-.place{font: bold 14px Tahoma,sans-serif;fill:#35291c;paint-order:stroke;stroke:#ead9ae;stroke-width:4px;stroke-linejoin:round;text-anchor:middle}
-.minor{font:12px Tahoma,sans-serif;fill:#493923;paint-order:stroke;stroke:#ead9ae;stroke-width:3px;text-anchor:middle}
-.dot{fill:#783d2c;stroke:#f2dfb5;stroke-width:2}
-.capital{fill:#a13d2e;stroke:#f6e6c6;stroke-width:3}
-.river{fill:none;stroke:#6e9d9a;stroke-width:4;stroke-linecap:round}
-.mountain{fill:#88775a;stroke:#5e503b;stroke-width:1.5}
-.forest{fill:#687a51;stroke:#43553a;stroke-width:1}
-.wall{stroke:#d7d1bd;stroke-width:9;stroke-linecap:round;stroke-dasharray:4 3}
-.route{fill:none;stroke:#a06a3d;stroke-width:2;stroke-dasharray:7 7;opacity:.75}
-.hidden{display:none}
-.legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;padding:12px;color:#cdbd98;font-size:12px}
-.note{text-align:center;color:#b9a985;font-size:11px;padding:0 15px 24px}
-</style>
-</head>
-<body>
-<header><h1>THE KNOWN WORLD</h1><p>وستروس و اسوس · پیش‌نویس مستقل نقشه جهان شناخته‌شده</p></header>
-<div class="toolbar">
-<button class="active" data-layer="names">نام مناطق</button>
-<button class="active" data-layer="cities">شهرها و دژها</button>
-<button class="active" data-layer="terrain">عوارض طبیعی</button>
-<button id="reset">نمای کامل</button>
-</div>
-<div class="frame"><div class="mapwrap">
-<svg id="map" viewBox="0 0 1600 1000" role="img" aria-label="نقشه شماتیک وستروس و اسوس">
-<defs>
-<pattern id="water" width="90" height="70" patternUnits="userSpaceOnUse"><path d="M5 22q20-8 40 0t40 0M-20 54q20-8 40 0t40 0" fill="none" stroke="#8eafa8" stroke-width="1" opacity=".42"/></pattern>
-<pattern id="paper" width="80" height="80" patternUnits="userSpaceOnUse"><circle cx="12" cy="17" r="1.2" fill="#9f875d" opacity=".25"/><circle cx="54" cy="48" r="1" fill="#9f875d" opacity=".2"/></pattern>
-</defs>
-<rect width="1600" height="1000" fill="#a9c4bd"/><rect width="1600" height="1000" fill="url(#water)"/>
-<!-- Westeros -->
-<path class="land" d="M270 70 L350 92 390 145 370 205 410 260 380 315 398 375 365 430 390 485 355 545 372 600 330 655 350 720 310 780 300 850 250 910 205 880 220 820 185 770 205 710 170 655 205 600 180 545 215 485 190 425 220 365 200 305 235 245 210 185 245 130Z"/>
-<path class="land2" d="M335 735 L390 755 405 805 375 860 335 900 300 875 310 820Z"/>
-<!-- Essos -->
-<path class="land2" d="M720 120 L805 80 920 92 1000 70 1100 100 1185 82 1280 130 1390 145 1480 210 1515 295 1470 370 1510 445 1450 515 1480 600 1410 680 1435 760 1350 835 1240 875 1150 840 1080 880 1000 825 930 850 860 790 805 730 780 650 730 595 760 530 710 470 750 400 710 325 755 250Z"/>
-<!-- Dorne / southern coast and islands -->
-<path class="island" d="M420 820l40 10 15 35-30 20-32-24z"/>
-<path class="island" d="M520 890l35 10 8 22-30 12-20-20z"/>
-<path class="island" d="M640 690l28 12 8 24-30 8-18-20z"/>
-<!-- islands -->
-<path class="island" d="M420 390l28 8 10 20-22 14-24-16z"/>
-<path class="island" d="M455 430l20 8 8 18-20 10-16-17z"/>
-<path class="island" d="M650 260l24 8 6 20-22 12-16-18z"/>
-<path class="island" d="M680 300l22 8 8 18-20 12-18-17z"/>
-<path class="island" d="M710 830l45 12 10 26-40 14-30-22z"/>
-<path class="island" d="M790 880l25 7 8 18-23 12-18-16z"/>
-<!-- far east and south hints -->
-<path class="island" d="M1450 850l50 10 15 30-42 18-38-25z"/>
-<path class="island" d="M1320 910l30 8 8 20-28 10-20-18z"/>
-<!-- wall -->
-<path class="wall" d="M218 215 Q285 230 375 205"/>
-<!-- rivers -->
-<g class="terrain">
-<path class="river" d="M330 465 Q300 510 330 550 T300 625"/>
-<path class="river" d="M330 550 Q375 565 390 610"/>
-<path class="river" d="M300 625 Q275 675 315 710"/>
-<path class="river" d="M360 665 Q390 700 370 745"/>
-<path class="river" d="M920 420 Q960 470 1035 480 T1120 540"/>
-<path class="river" d="M1015 490 Q995 545 1035 590"/>
+<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>اطلس وستروس و اسوس</title><style>
+*{box-sizing:border-box}body{margin:0;background:#1c201e;color:#ead9b5;font-family:Tahoma,Arial}header{text-align:center;padding:18px}h1{font: bold 34px Georgia;color:#ead6a7;letter-spacing:3px;margin:0}header p{color:#c2b18b;font-size:13px}nav{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 8px 14px}button{background:#39372d;color:#eee0c2;border:1px solid #99835b;border-radius:22px;padding:9px 15px}button.on{background:#b18a4d;color:#201a11}main{max-width:1500px;margin:auto;padding:0 10px 24px}.sheet{border:9px solid #57462e;box-shadow:0 15px 55px #0009}svg{display:block;width:100%;height:auto;background:#a9c4bd}.continent{font:bold 29px Georgia;letter-spacing:5px;fill:#705a39;text-anchor:middle;opacity:.8}.region{font:bold 15px Georgia;fill:#796344;text-anchor:middle;paint-order:stroke;stroke:#e0cda1;stroke-width:3px}.sea{font:italic 22px Georgia;letter-spacing:3px;fill:#557d7a;text-anchor:middle}.city{font:bold 13px Georgia;fill:#38291b;text-anchor:middle;paint-order:stroke;stroke:#e3d1a8;stroke-width:4px}.town{font:12px Georgia;fill:#4a3924;text-anchor:middle;paint-order:stroke;stroke:#e3d1a8;stroke-width:3px}.dot{fill:#803b2b;stroke:#f0dfb7;stroke-width:2}.capital{fill:#a33e2b;stroke:#f6e6c6;stroke-width:3}.river{fill:none;stroke:#679a99;stroke-width:3}.mount{fill:#81745e;stroke:#5f513b;stroke-width:1.3}.tree{fill:#65764d;stroke:#46563a}.route{fill:none;stroke:#a16e40;stroke-width:2;stroke-dasharray:7 8}.off{display:none}.legend{text-align:center;padding:12px;color:#c7b68f;font-size:12px}
+</style><header><h1>THE KNOWN WORLD</h1><p>وستروس و اسوس · اطلس مستقل · نسخه طراحی دوم</p></header><nav><button class="on" data-layer="regions">قلمروها</button><button class="on" data-layer="cities">شهرها و دژها</button><button class="on" data-layer="terrain">جغرافیا</button><button class="on" data-layer="routes">مسیرها</button><button id="all">نمای کامل</button></nav><main><div class="sheet"><svg viewBox="0 0 1600 1040" role="img" aria-label="نقشه وستروس و اسوس">
+<defs><pattern id="waves" width="110" height="75" patternUnits="userSpaceOnUse"><path d="M5 20q20-8 40 0t40 0M-25 53q20-8 40 0t40 0" fill="none" stroke="#779f99" opacity=".45"/></pattern><pattern id="grain" width="75" height="75" patternUnits="userSpaceOnUse"><circle cx="12" cy="17" r="1" fill="#8c754e" opacity=".22"/><circle cx="50" cy="48" r="1" fill="#8c754e" opacity=".2"/></pattern></defs>
+<rect width="1600" height="1040" fill="#a9c4bd"/><rect width="1600" height="1040" fill="url(#waves)"/>
+<!-- Westeros organic coastline -->
+<path d="M285 48 C260 76 248 102 258 132 Q275 160 239 203 Q228 231 236 282 Q220 310 216 360 Q202 390 205 445 Q192 476 199 527 Q185 554 194 609 Q182 640 191 687 Q184 716 198 765 Q190 793 205 842 Q201 871 215 916 Q211 943 258 953 Q280 947 306 910 Q328 892 359 850 Q381 830 403 782 Q424 758 438 709 Q457 686 462 637 Q480 610 480 559 Q496 534 495 485 Q510 458 505 406 Q516 379 510 327 Q522 299 515 248 Q524 220 519 170 Q528 144 495 98 Q479 73 435 79 Q412 92 377 64 Q332 31 309 40Z" fill="#dfcc9e" stroke="#715b3a" stroke-width="4"/>
+<!-- Dorne peninsula -->
+<path d="M402 782 Q452 794 470 844 Q478 870 441 917 Q395 958 368 961 Q346 963 338 925 Q348 902 366 865 Q367 839 402 782Z" fill="#d9c493" stroke="#715b3a" stroke-width="3"/>
+<path d="M300 582Q340 558 379 588Q390 606 354 645Q315 660 290 621Z" fill="#c6b789" stroke="#806b47" stroke-width="2"/>
+<!-- Essos organic continental mass -->
+<path d="M720 92 Q750 70 814 63 Q846 47 899 53 Q928 44 982 53 Q1013 43 1068 53 Q1098 47 1151 58 Q1181 52 1235 68 Q1266 64 1318 85 Q1350 86 1401 113 Q1435 122 1477 163 Q1507 181 1506 239 Q1495 267 1510 317 Q1501 348 1502 402 Q1484 431 1480 485 Q1460 515 1460 567 Q1438 594 1431 649 Q1410 677 1395 729 Q1371 755 1351 801 Q1322 822 1262 832 Q1231 827 1183 845 Q1153 841 1100 849 Q1072 837 1018 839 Q990 823 939 818 Q913 799 866 787 Q845 765 807 741 Q794 714 773 670 Q775 642 758 595 Q765 566 750 517 Q758 487 744 436 Q755 406 742 351 Q753 320 746 268 Q759 239 752 187 Q766 158 720 92Z" fill="#ddc99a" stroke="#715b3a" stroke-width="4"/>
+<path d="M850 706Q900 690 932 728Q947 751 909 792Q885 804 856 788Q830 747 850 706Z" fill="#cbb887" stroke="#715b3a" stroke-width="2.5"/>
+<path d="M1334 791Q1396 785 1408 823Q1421 848 1384 892Q1361 906 1334 893Q1310 844 1334 791Z" fill="#d7c493" stroke="#715b3a" stroke-width="2"/>
+<!-- island chains -->
+<g fill="#ddc99a" stroke="#715b3a" stroke-width="2"><path d="M492 385q25-17 43 3l-4 28-25 12-22-19z"/><path d="M523 436q20-11 33 7l-7 23-23 5-14-17z"/><path d="M625 260q23-15 38 4l-5 24-24 10-18-18z"/><path d="M655 305q18-10 30 5l-4 22-19 8-15-16z"/><path d="M545 878q23-10 37 8l-6 24-25 5-17-17z"/><path d="M590 918q17-8 28 6l-4 18-18 6-12-14z"/><path d="M680 830q27-12 45 9l-6 26-29 7-20-20z"/><path d="M780 884q19-10 32 6l-5 20-20 6-14-15z"/><path d="M1462 900q26-10 41 9l-8 23-27 5-18-17z"/></g>
+<g id="regions"><text class="continent" x="350" y="490">WESTEROS</text><text class="continent" x="1110" y="450">ESSOS</text>
+<path d="M245 268Q340 280 490 255M205 510Q320 535 490 500M205 690Q320 700 455 670M235 815Q330 825 430 790" fill="none" stroke="#9c8055" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text class="region" x="355" y="160">BEYOND THE WALL</text><text class="region" x="350" y="330">THE NORTH</text><text class="region" x="310" y="550">THE RIVERLANDS</text><text class="region" x="435" y="500">THE VALE</text><text class="region" x="270" y="735">THE WESTERLANDS</text><text class="region" x="400" y="750">THE REACH</text><text class="region" x="505" y="650">THE CROWNLANDS</text><text class="region" x="510" y="700">THE STORMLANDS</text><text class="region" x="390" y="920">DORNE</text>
+<text class="region" x="1010" y="180">THE FREE CITIES</text><text class="region" x="1170" y="355">THE DOTHRAKI SEA</text><text class="region" x="1300" y="555">SLAVER'S BAY</text><text class="region" x="1080" y="735">VALYRIA</text><text class="region" x="1390" y="770">THE RED WASTE</text><text class="region" x="820" y="610">THE DISPUTED LANDS</text></g>
+<g id="terrain"><path d="M236 211Q320 227 508 178" fill="none" stroke="#e9e3cf" stroke-width="10" stroke-linecap="round"/><path d="M236 211Q320 227 508 178" fill="none" stroke="#7f8a83" stroke-width="2" stroke-dasharray="3 5"/>
+<g class="mount"><path d="M265 280l20-44 21 44zM292 300l22-48 22 48zM322 318l22-47 22 47zM350 330l20-42 22 42zM377 345l21-45 23 45zM240 690l22-45 22 45zM270 704l22-48 24 48zM300 713l22-45 22 45zM1020 250l25-48 25 48zM1050 272l25-53 26 53zM1085 294l25-49 25 49zM1120 315l25-48 25 48zM1155 337l24-46 24 46zM1280 490l22-44 23 44zM1310 515l23-47 24 47zM1340 540l22-43 23 43z"/></g>
+<g class="tree"><path d="M260 420l-17 32h34zM285 430l-17 32h34zM310 420l-17 32h34zM335 438l-17 32h34zM360 430l-17 32h34zM280 468l-17 32h34zM310 477l-17 32h34zM385 690l-17 32h34zM410 700l-17 32h34zM435 690l-17 32h34zM460 703l-17 32h34zM895 560l-17 32h34zM920 570l-17 32h34zM945 560l-17 32h34zM970 574l-17 32h34zM995 565l-17 32h34z"/></g>
+<path class="river" d="M340 380Q320 425 342 455T330 520T358 566T345 625M330 520Q385 525 405 565T430 620M300 700Q340 680 360 710T390 760M920 380Q960 420 1010 425T1090 470T1160 500M1020 425Q1005 480 1045 520T1070 580"/>
 </g>
-<!-- mountain chains -->
-<g class="terrain">
-<g class="mountain"><path d="M260 300l24-45 24 45z M290 320l25-52 26 52z M325 340l24-43 25 43z M245 350l20-40 22 40z M275 380l22-45 23 45z"/></g>
-<g class="mountain"><path d="M400 620l25-45 25 45z M430 640l24-48 25 48z M460 660l25-45 25 45z"/></g>
-<g class="mountain"><path d="M1070 250l26-50 27 50z M1105 275l28-55 28 55z M1140 300l25-48 27 48z M1175 325l27-50 28 50z M1210 350l25-45 25 45z"/></g>
-<g class="mountain"><path d="M1280 530l25-45 25 45z M1315 560l25-50 27 50z M1350 590l24-45 25 45z"/></g>
-<!-- forests -->
-<g class="forest"><path d="M270 480l-18 34h36z M295 490l-18 34h36z M320 480l-18 34h36z M285 525l-18 34h36z M310 535l-18 34h36z"/>
-<path d="M900 600l-18 34h36z M925 610l-18 34h36z M950 600l-18 34h36z M975 620l-18 34h36z M1000 610l-18 34h36z"/></g>
-</g>
-<!-- labels -->
-<g id="names">
-<text class="region" x="290" y="160">BEYOND THE WALL</text><text class="region" x="300" y="405">THE NORTH</text>
-<text class="region" x="270" y="575">THE RIVERLANDS</text><text class="region" x="390" y="560">THE VALE</text>
-<text class="region" x="245" y="735">THE WESTERLANDS</text><text class="region" x="420" y="770">THE REACH</text>
-<text class="region" x="355" y="865">DORNE</text><text class="region" x="505" y="650">STORMLANDS</text>
-<text class="region" x="475" y="500">CROWNLANDS</text><text class="region" x="470" y="300">IRON ISLANDS</text>
-<text class="region" x="1040" y="175">THE FREE CITIES</text><text class="region" x="1120" y="410">THE DOTHRAKI SEA</text>
-<text class="region" x="1320" y="620">SLAVER'S BAY</text><text class="region" x="1390" y="780">THE RED WASTE</text>
-<text class="region" x="970" y="740">VALYRIA</text><text class="region" x="1430" y="300">THE JADE SEA</text>
-<text class="sealabel" x="570" y="450">THE NARROW SEA</text><text class="sealabel" x="95" y="500">SUNSET SEA</text>
-<text class="sealabel" x="800" y="955">SUMMER SEA</text><text class="sealabel" x="800" y="45">SHIVERING SEA</text>
-<text class="smallregion" x="1170" y="555">THE RHoyNE</text><text class="smallregion" x="1210" y="880">ASSHAI-BY-THE-SHADOW</text>
-</g>
-<!-- locations -->
+<g id="routes"><path class="route" d="M475 610Q610 530 790 260M790 260Q900 290 980 410M980 410Q1050 500 1190 530M475 610Q620 700 880 755"/></g>
 <g id="cities">
-<circle class="capital" cx="300" cy="350" r="7"/><text class="place" x="300" y="335">WINTERFELL</text>
-<circle class="dot" cx="260" cy="220" r="5"/><text class="minor" x="260" y="205">CASTLE BLACK</text>
-<circle class="dot" cx="230" cy="670" r="5"/><text class="minor" x="230" y="655">CASTERLY ROCK</text>
-<circle class="dot" cx="420" cy="600" r="5"/><text class="minor" x="420" y="585">THE EYRIE</text>
-<circle class="dot" cx="325" cy="590" r="5"/><text class="minor" x="325" y="575">RIVERRUN</text>
-<circle class="capital" cx="470" cy="545" r="7"/><text class="place" x="470" y="530">KING'S LANDING</text>
-<circle class="dot" cx="420" cy="750" r="5"/><text class="minor" x="420" y="735">HIGHGARDEN</text>
-<circle class="dot" cx="500" cy="830" r="5"/><text class="minor" x="500" y="815">OLDTOWN</text>
-<circle class="dot" cx="520" cy="700" r="5"/><text class="minor" x="520" y="685">STORM'S END</text>
-<circle class="dot" cx="380" cy="870" r="5"/><text class="minor" x="380" y="855">SUNSPEAR</text>
-<circle class="dot" cx="430" cy="400" r="5"/><text class="minor" x="430" y="385">PYKE</text>
-<circle class="dot" cx="560" cy="500" r="5"/><text class="minor" x="560" y="485">DRAGONSTONE</text>
-<circle class="capital" cx="800" cy="220" r="7"/><text class="place" x="800" y="205">BRAAVOS</text>
-<circle class="dot" cx="900" cy="300" r="5"/><text class="minor" x="900" y="285">PENTOS</text>
-<circle class="dot" cx="930" cy="430" r="5"/><text class="minor" x="930" y="415">MYR</text>
-<circle class="dot" cx="850" cy="500" r="5"/><text class="minor" x="850" y="485">TYROSH</text>
-<circle class="dot" cx="920" cy="540" r="5"/><text class="minor" x="920" y="525">LYS</text>
-<circle class="dot" cx="1000" cy="370" r="5"/><text class="minor" x="1000" y="355">NORVOS</text>
-<circle class="dot" cx="1060" cy="400" r="5"/><text class="minor" x="1060" y="385">QOHOR</text>
-<circle class="capital" cx="1080" cy="650" r="7"/><text class="place" x="1080" y="635">VOLANTIS</text>
-<circle class="dot" cx="1230" cy="500" r="5"/><text class="minor" x="1230" y="485">MEEREEN</text>
-<circle class="dot" cx="1300" cy="560" r="5"/><text class="minor" x="1300" y="545">YUNKAI</text>
-<circle class="dot" cx="1340" cy="610" r="5"/><text class="minor" x="1340" y="595">ASTAPOR</text>
-<circle class="dot" cx="1370" cy="750" r="5"/><text class="minor" x="1370" y="735">QARTH</text>
-<circle class="dot" cx="1430" cy="845" r="5"/><text class="minor" x="1430" y="830">ASSHAI</text>
-<circle class="dot" cx="1130" cy="290" r="5"/><text class="minor" x="1130" y="275">VAES DOTHRAK</text>
-</g>
-<!-- compass -->
-<g transform="translate(90 850)"><circle r="48" fill="#e7d5a9" fill-opacity=".65" stroke="#806a47" stroke-width="2"/><path d="M0-38L9 0 0 38-9 0z M-38 0L0-9 38 0 0 9z" fill="#82643a"/><text x="0" y="-57" text-anchor="middle" fill="#40301e" font-size="16">N</text></g>
-<g transform="translate(1510 930)"><rect x="-68" y="-32" width="136" height="44" rx="5" fill="#ead9ae" fill-opacity=".8" stroke="#806a47"/><text x="0" y="-5" text-anchor="middle" fill="#493923" font-size="13">DRAFT ATLAS · v0.1</text></g>
-</svg></div>
-<div class="legend"><span>● شهر یا دژ مهم</span><span>▲ رشته‌کوه</span><span>خط آبی: رودخانه</span><span>خط‌چین سفید: دیوار</span></div>
-</div>
-<div class="note">این یک نقشه شماتیک و پیش‌نویس طراحی مستقل است؛ فاصله‌ها و مرزها برای نمایش استراتژیک تقریبی‌اند، نه مقیاس جغرافیایی دقیق. هنوز به بازی متصل نشده است.</div>
-<script>
-document.querySelectorAll('[data-layer]').forEach(b=>b.addEventListener('click',()=>{const el=document.getElementById(b.dataset.layer);el.classList.toggle('hidden');b.classList.toggle('active')}));
-document.getElementById('reset').addEventListener('click',()=>{document.querySelectorAll('[data-layer]').forEach(b=>{document.getElementById(b.dataset.layer).classList.remove('hidden');b.classList.add('active')});document.getElementById('map').setAttribute('viewBox','0 0 1600 1000')});
-</script>
-</body></html>
+<circle class="capital" cx="350" cy="350" r="7"/><text class="city" x="350" y="335">WINTERFELL</text><circle class="dot" cx="280" cy="220" r="5"/><text class="town" x="280" y="205">CASTLE BLACK</text>
+<circle class="dot" cx="250" cy="710" r="5"/><text class="town" x="250" y="695">CASTERLY ROCK</text><circle class="dot" cx="435" cy="500" r="5"/><text class="town" x="435" y="485">THE EYRIE</text><circle class="dot" cx="335" cy="585" r="5"/><text class="town" x="335" y="570">RIVERRUN</text>
+<circle class="capital" cx="475" cy="610" r="7"/><text class="city" x="475" y="595">KING'S LANDING</text><circle class="dot" cx="395" cy="760" r="5"/><text class="town" x="395" y="745">HIGHGARDEN</text><circle class="dot" cx="465" cy="835" r="5"/><text class="town" x="465" y="820">OLDTOWN</text><circle class="dot" cx="525" cy="700" r="5"/><text class="town" x="525" y="685">STORM'S END</text><circle class="dot" cx="390" cy="910" r="5"/><text class="town" x="390" y="895">SUNSPEAR</text><circle class="dot" cx="495" cy="405" r="5"/><text class="town" x="495" y="390">PYKE</text><circle class="dot" cx="565" cy="565" r="5"/><text class="town" x="565" y="550">DRAGONSTONE</text>
+<circle class="capital" cx="790" cy="260" r="7"/><text class="city" x="790" y="245">BRAAVOS</text><circle class="dot" cx="900" cy="315" r="5"/><text class="town" x="900" y="300">PENTOS</text><circle class="dot" cx="955" cy="425" r="5"/><text class="town" x="955" y="410">MYR</text><circle class="dot" cx="870" cy="510" r="5"/><text class="town" x="870" y="495">TYROSH</text><circle class="dot" cx="925" cy="565" r="5"/><text class="town" x="925" y="550">LYS</text><circle class="dot" cx="1030" cy="365" r="5"/><text class="town" x="1030" y="350">NORVOS</text><circle class="dot" cx="1080" cy="395" r="5"/><text class="town" x="1080" y="380">QOHOR</text><circle class="capital" cx="1100" cy="670" r="7"/><text class="city" x="1100" y="655">VOLANTIS</text><circle class="dot" cx="1240" cy="520" r="5"/><text class="town" x="1240" y="505">MEEREEN</text><circle class="dot" cx="1300" cy="580" r="5"/><text class="town" x="1300" y="565">YUNKAI</text><circle class="dot" cx="1350" cy="635" r="5"/><text class="town" x="1350" y="620">ASTAPOR</text><circle class="dot" cx="1390" cy="780" r="5"/><text class="town" x="1390" y="765">QARTH</text><circle class="dot" cx="1450" cy="860" r="5"/><text class="town" x="1450" y="845">ASSHAI</text><circle class="dot" cx="1165" cy="315" r="5"/><text class="town" x="1165" y="300">VAES DOTHRAK</text></g>
+<text class="sea" x="620" y="440">THE NARROW SEA</text><text class="sea" x="90" y="560">SUNSET SEA</text><text class="sea" x="780" y="980">SUMMER SEA</text><text class="sea" x="820" y="35">SHIVERING SEA</text>
+<g transform="translate(90 890)"><circle r="42" fill="#e7d6ae" fill-opacity=".8" stroke="#806a47" stroke-width="2"/><path d="M0-33L8 0 0 33-8 0zM-33 0L0-8 33 0 0 8z" fill="#82643a"/><text x="0" y="-50" text-anchor="middle" fill="#40301e" font-size="14">N</text></g><text x="1500" y="1000" text-anchor="middle" fill="#493923" font-size="12">ATLAS · DRAFT II</text>
+</svg></div><div class="legend">● شهر و دژ　　▲ کوهستان　　خط آبی: رودخانه　　خط روشن: دیوار　　خط‌چین: مسیر سفر</div></main><script>
+document.querySelectorAll('[data-layer]').forEach(b=>b.onclick=()=>{document.getElementById(b.dataset.layer).classList.toggle('off');b.classList.toggle('on')});
+document.getElementById('all').onclick=()=>document.querySelectorAll('[data-layer]').forEach(b=>{document.getElementById(b.dataset.layer).classList.remove('off');b.classList.add('on')});
+</script></html>
