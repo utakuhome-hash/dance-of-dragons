@@ -1400,7 +1400,7 @@ async def marriage_handler(request):
             JOIN players p ON p.id=cp.owner_player_id AND p.is_active=TRUE
             LEFT JOIN houses h ON h.id=p.house_id
             WHERE cp.gender='female' AND p.id<>$1
-              AND COALESCE(cp.spouse,'') IN ('','هنوز ازدواج نکرده')
+              AND COALESCE(cp.spouse,'') IN ('','هنوز ازدواج نکرده','نیازمند تعیین','ثبت نشده')
               AND NOT EXISTS (SELECT 1 FROM marriages m WHERE m.bride_profile_id=cp.id OR m.groom_profile_id=cp.id)
             ORDER BY p.username, cp.character_name
         """, player["id"])
@@ -1512,7 +1512,7 @@ async def marriage_proposal_create_handler(request):
                 "SELECT EXISTS(SELECT 1 FROM players WHERE id=$1 AND is_active=TRUE)",bride["owner_player_id"]
             ):
                 return json_error("bride_unavailable")
-            if str(groom["spouse"] or "") not in ("","هنوز ازدواج نکرده") or str(bride["spouse"] or "") not in ("","هنوز ازدواج نکرده"):
+            if str(groom["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده") or str(bride["spouse"] or "") not in ("","هنوز ازدواج نکرده","نیازمند تعیین","ثبت نشده"):
                 return json_error("character_already_married")
             exists=await conn.fetchval("""
                 SELECT EXISTS(SELECT 1 FROM marriages WHERE groom_profile_id=ANY($1::bigint[]) OR bride_profile_id=ANY($1::bigint[]))
