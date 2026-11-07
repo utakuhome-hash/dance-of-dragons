@@ -1715,7 +1715,7 @@ async def wedding_gift_handler(request):
         quantity=int(data.get("quantity",0))
     except Exception:
         return json_error("invalid_gift")
-    if item not in TRADE_GOODS or quantity<1 or quantity>1000000:
+    if item not in (TRADE_GOODS | {"سکه"}) or quantity<1 or quantity>1000000:
         return json_error("invalid_gift")
     import json
     async with request.app["db"].acquire() as conn:
@@ -1749,7 +1749,7 @@ async def wedding_gift_handler(request):
                 return json_error("house_not_found")
             guest=_canonical_house_resources(_json_object(guest_house["resources"]),_json_object(guest_house["game_state"]).get("resources"))
             target=_canonical_house_resources(_json_object(target_house["resources"]),_json_object(target_house["game_state"]).get("resources"))
-            mapping={"چوب":("wood",None),"سنگ":("stone",None),"آهن":("iron",None),"غذا":("food",None),"اسب جنگی":("warhorses",None),"خز":("specialGoods","fur"),"پشم":("specialGoods","wool"),"شراب":("specialGoods","wine"),"ادویه":("specialGoods","spice"),"آهن سیاه":("specialGoods","blackIron"),"نمک":("specialGoods","salt")}
+            mapping={"سکه":("coins",None),"چوب":("wood",None),"سنگ":("stone",None),"آهن":("iron",None),"غذا":("food",None),"اسب جنگی":("warhorses",None),"خز":("specialGoods","fur"),"پشم":("specialGoods","wool"),"شراب":("specialGoods","wine"),"ادویه":("specialGoods","spice"),"آهن سیاه":("specialGoods","blackIron"),"نمک":("specialGoods","salt")}
             key,sub=mapping[item]
             guest_bucket=guest[key] if sub else guest
             target_bucket=target[key] if sub else target
