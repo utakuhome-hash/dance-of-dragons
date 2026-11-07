@@ -724,11 +724,17 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
    const allCharacters=Array.isArray(profileData.profiles)?profileData.profiles:[];
    renderHouseEconomy(h.houses||[]);
    const d={players:[...first.players]};
+   const summary=document.createElement('div');summary.className='house-save-status';
+   summary.style.cssText='display:block;margin:8px 0;padding:9px;border:1px solid #80643c;border-radius:9px;line-height:1.9';
+   summary.textContent='در حال شمارش بازیکنان…';list.append(summary);
    for(let page=2;page<=first.pages;page++){
     const next=await api('/api/admin/players?limit=50&page='+page);
     d.players.push(...next.players);
    }
    list.replaceChildren();
+   const onlineCount=d.players.filter(p=>p.is_online).length;
+   summary.textContent='کل حساب‌های ثبت‌شده: '+Number(first.total||d.players.length)+' · آنلاین در ۵ دقیقهٔ اخیر: '+onlineCount+' · آفلاین: '+(d.players.length-onlineCount);
+   list.append(summary);
    d.players.forEach(p=>{
     const row=document.createElement('div');row.className='player-row';
     const n=document.createElement('span');n.textContent=p.username||'بدون نام';
@@ -738,8 +744,11 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     const loginText=p.last_login_at?new Date(p.last_login_at).toLocaleString('fa-IR'):'ورود ثبت نشده';
     const installText=p.last_install_id?'…'+String(p.last_install_id).slice(-8):'ثبت نشده';
     const sameDevice=(p.install_accounts||[]).map(x=>x.username+' (#'+x.id+')').join('، ');
-    accessInfo.textContent='IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · شناسه نصب: '+installText+' · تعداد اکانت‌های همین گوشی: '+Number(p.install_account_count||0)+' · اکانت‌های همین گوشی: '+(sameDevice||'هنوز اکانت دیگری با این شناسه ثبت نشده')+' · اکانت‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0)+' · ورود: '+loginText;
-    if(Number(p.ip_account_count||0)>1||Number(p.install_account_count||0)>1)accessInfo.style.color='#f0c27a';
+    const activityText=p.last_activity_at?new Date(p.last_activity_at).toLocaleString('fa-IR'):'فعالیتی ثبت نشده';
+    const presenceText=p.is_online?'🟢 آنلاین':'⚪ آفلاین';
+    accessInfo.textContent=presenceText+' · آخرین فعالیت: '+activityText+' · آخرین ورود: '+loginText+' · IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · شناسه نصب: '+installText+' · تعداد اکانت‌های همین گوشی: '+Number(p.install_account_count||0)+' · اکانت‌های همین گوشی: '+(sameDevice||'هنوز اکانت دیگری با این شناسه ثبت نشده')+' · اکانت‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0);
+    if(p.is_online)accessInfo.style.color='#9fe0a6';
+    else if(Number(p.ip_account_count||0)>1||Number(p.install_account_count||0)>1)accessInfo.style.color='#f0c27a';
     const select=document.createElement('select');select.setAttribute('aria-label','خاندان '+(p.username||'بازیکن'));
     select.add(new Option('انتخاب خاندان',''));
     h.houses.forEach(x=>select.add(new Option(x.name+' · '+(x.castle||'بدون قلعه'),String(x.id))));
