@@ -1436,6 +1436,16 @@ async def marriage_handler(request):
             WHERE m.groom_player_id=$1 OR m.bride_player_id=$1
             ORDER BY m.created_at DESC
         """, player["id"])
+        gifts = await conn.fetch("""
+            SELECT wg.id, wg.item_name, wg.quantity, wg.created_at,
+                   p.username AS sender_name, wi.marriage_id
+            FROM wedding_gifts wg
+            JOIN wedding_invitations wi ON wi.id=wg.invitation_id
+            JOIN players p ON p.id=wg.sender_player_id
+            JOIN marriages m ON m.id=wi.marriage_id
+            WHERE m.groom_player_id=$1 OR m.bride_player_id=$1
+            ORDER BY wg.created_at DESC LIMIT 200
+        """, player["id"])
         invitations = await conn.fetch("""
             SELECT wi.id, wi.response, wi.created_at, m.id AS marriage_id,
                    gp.character_name AS groom_name, bp.character_name AS bride_name,
@@ -1465,6 +1475,7 @@ async def marriage_handler(request):
         "outgoing":[clean(r,("created_at",)) for r in outbox],
         "marriages":[clean(r,("created_at","ceremony_at","satisfaction_expires_at")) for r in marriages],
         "invitations":[clean(r,("created_at","ceremony_at")) for r in invitations],
+        "gifts":[clean(r,("created_at",)) for r in gifts],
         "ceremonies": MARRIAGE_CEREMONIES,
     })
 
@@ -3420,14 +3431,14 @@ async def profiles_list_handler(request):
     async with request.app["db"].acquire() as conn:
         if is_admin:
             rows = await conn.fetch("""
-                SELECT id, character_name, title, location, house, owner_player_id
+                SELECT id, character_name, title, location, house, gender, owner_player_id
                 FROM character_profiles ORDER BY character_name
             """)
         else:
             # The personal profile section lists only characters assigned to this player.
             # Public biographies remain available through /api/profiles/public (court pages).
             rows = await conn.fetch("""
-                SELECT id, character_name, title, location, house
+                SELECT id, character_name, title, location, house, gender
                 FROM character_profiles
                 WHERE owner_player_id = $1
                 ORDER BY character_name
@@ -3477,7 +3488,7 @@ async def profile_detail_handler(request):
     async with request.app["db"].acquire() as conn:
         row = await conn.fetchrow("""
             SELECT id, character_name, biography, age, health, title, location,
-                   spouse, children, dragon, house, owner_player_id,
+                   spouse, gender, children, dragon, house, owner_player_id,
                    warfare, intelligence, diplomacy, management, faith
             FROM character_profiles WHERE id = $1
         """, profile_id)
@@ -3517,6 +3528,9 @@ async def admin_update_profile_handler(request):
             if len(value) > (3000 if key == "biography" else 500):
                 return json_error("field_too_long")
         values[key] = value or None
+    gender = str(data.get("gender") or "unknown").strip().lower()
+    if gender not in ("male", "female", "unknown"):
+        return json_error("invalid_gender")
     owner_raw = data.get("owner_player_id")
     try:
         owner_id = int(owner_raw) if owner_raw not in (None, "") else None
@@ -3542,9 +3556,9 @@ async def admin_update_profile_handler(request):
                 biography=$1, age=$2, health=$3, title=$4, location=$5,
                 spouse=$6, children=$7, dragon=$8, house=$9, owner_player_id=$10,
                 warfare=$11, intelligence=$12, diplomacy=$13, management=$14, faith=$15,
-                updated_at=NOW()
-            WHERE id=$16 RETURNING id, character_name
-        """, *(values[k] for k in public_fields), owner_id, *skill_values, profile_id)
+                gender=$16, updated_at=NOW()
+            WHERE id=$17 RETURNING id, character_name, gender
+        """, *(values[k] for k in public_fields), owner_id, *skill_values, gender, profile_id)
     if not updated:
         return json_error("profile_not_found", 404)
     return web.json_response({"ok": True, "profile": dict(updated)})
