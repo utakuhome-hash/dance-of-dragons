@@ -2108,6 +2108,92 @@ async def military_campaign_destination_handler(request):
     return web.json_response({"ok":True,"campaign":dict(row)})
 
 
+async def admin_military_campaigns_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT m.id, m.sender_player_id, m.sender_house_id, m.commander_player_id,
+                   m.commander_name, m.target, m.mission, m.troop_count, m.status,
+                   m.created_at, s.username AS sender_name, sh.name AS sender_house_name,
+                   r.winner, r.attacker_losses, r.defender_losses, r.result_note,
+                   r.declared_at, a.username AS declared_by_name
+            FROM military_campaigns m
+            JOIN players s ON s.id=m.sender_player_id
+            LEFT JOIN houses sh ON sh.id=m.sender_house_id
+            LEFT JOIN military_campaign_results r ON r.campaign_id=m.id
+            LEFT JOIN players a ON a.id=r.declared_by
+            ORDER BY m.created_at DESC
+            LIMIT 100
+        """)
+    campaigns = []
+    for row in rows:
+        item = dict(row)
+        for field in ("created_at", "declared_at"):
+            if item.get(field):
+                item[field] = item[field].isoformat()
+        campaigns.append(item)
+    return web.json_response({"ok": True, "campaigns": campaigns})
+
+
+async def admin_military_campaign_result_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        campaign_id = int(request.match_info["campaign_id"])
+        data = await request.json()
+        winner = str(data.get("winner", "")).strip()
+        attacker_losses = int(data.get("attacker_losses", 0))
+        defender_losses = int(data.get("defender_losses", 0))
+        note = str(data.get("note", "") or "").strip()
+    except (ValueError, TypeError):
+        return json_error("invalid_battle_result")
+    if winner not in {"attacker", "defender", "draw"}:
+        return json_error("invalid_winner")
+    if attacker_losses < 0 or defender_losses < 0 or attacker_losses > 100000000 or defender_losses > 100000000:
+        return json_error("invalid_casualties")
+    if len(note) > 1000:
+        return json_error("result_note_too_long")
+    async with request.app["db"].acquire() as conn:
+        async with conn.transaction():
+            campaign = await conn.fetchrow("""
+                SELECT id, troop_count, status
+                FROM military_campaigns
+                WHERE id=$1
+                FOR UPDATE
+            """, campaign_id)
+            if not campaign:
+                return json_error("campaign_not_found", 404)
+            if campaign["status"] not in {"dispatched", "completed"}:
+                return json_error("campaign_not_resolved", 409)
+            if attacker_losses > int(campaign["troop_count"]):
+                return json_error("attacker_losses_exceed_troops", 400)
+            await conn.execute("""
+                INSERT INTO military_campaign_results
+                    (campaign_id, winner, attacker_losses, defender_losses, result_note, declared_by, declared_at)
+                VALUES ($1,$2,$3,$4,$5,$6,NOW())
+                ON CONFLICT (campaign_id) DO UPDATE SET
+                    winner=EXCLUDED.winner,
+                    attacker_losses=EXCLUDED.attacker_losses,
+                    defender_losses=EXCLUDED.defender_losses,
+                    result_note=EXCLUDED.result_note,
+                    declared_by=EXCLUDED.declared_by,
+                    declared_at=NOW()
+            """, campaign_id, winner, attacker_losses, defender_losses, note, admin["id"])
+            await conn.execute("""
+                UPDATE military_campaigns
+                SET status='completed', responded_at=COALESCE(responded_at,NOW())
+                WHERE id=$1
+            """, campaign_id)
+    return web.json_response({
+        "ok": True, "campaign_id": campaign_id, "status": "completed",
+        "winner": winner, "attacker_losses": attacker_losses,
+        "defender_losses": defender_losses
+    })
+
+
 async def logout_handler(request):
     token = get_bearer_token(request)
     if token:
@@ -4226,6 +4312,19 @@ async def on_startup(app):
         await conn.execute("CREATE INDEX IF NOT EXISTS military_campaigns_parties_idx ON military_campaigns (sender_player_id, commander_player_id, status, created_at DESC)")
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS military_campaign_results (
+                campaign_id BIGINT PRIMARY KEY REFERENCES military_campaigns(id) ON DELETE CASCADE,
+                winner VARCHAR(20) NOT NULL CHECK (winner IN ('attacker','defender','draw')),
+                attacker_losses BIGINT NOT NULL DEFAULT 0 CHECK (attacker_losses >= 0),
+                defender_losses BIGINT NOT NULL DEFAULT 0 CHECK (defender_losses >= 0),
+                result_note TEXT NOT NULL DEFAULT '',
+                declared_by BIGINT NOT NULL REFERENCES players(id),
+                declared_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS market_listings (
                 id BIGSERIAL PRIMARY KEY,
                 seller_player_id BIGINT NOT NULL REFERENCES players(id),
@@ -4385,6 +4484,8 @@ def create_app():
     app.router.add_post("/api/military/campaigns", military_campaign_create_handler)
     app.router.add_post("/api/military/campaigns/{campaign_id}/respond", military_campaign_respond_handler)
     app.router.add_put("/api/military/campaigns/{campaign_id}/destination", military_campaign_destination_handler)
+    app.router.add_get("/api/admin/military/campaigns", admin_military_campaigns_handler)
+    app.router.add_post("/api/admin/military/campaigns/{campaign_id}/result", admin_military_campaign_result_handler)
     app.router.add_get("/api/marriage", marriage_handler)
     app.router.add_post("/api/marriage/proposals", marriage_proposal_create_handler)
     app.router.add_post("/api/marriage/proposals/{proposal_id}/respond", marriage_proposal_respond_handler)
