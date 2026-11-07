@@ -3249,10 +3249,12 @@ async def twins_policy_update_handler(request):
         """,mode,blocked,queue_rule,player["id"])
         await conn.execute("""
             UPDATE trade_caravans SET status=CASE
-              WHEN $1='cancel' THEN 'cancelled'
-              ELSE 'waiting_bridge' END, updated_at=NOW()
-            WHERE status='waiting_bridge' AND owner_house_id=ANY($2::bigint[])
-        """,queue_rule,blocked)
+              WHEN $1='cancel' AND owner_house_id=ANY($2::bigint[]) THEN 'cancelled'
+              WHEN $3='open' OR NOT(owner_house_id=ANY($2::bigint[])) THEN 'in_transit'
+              WHEN crosses_twins THEN 'waiting_bridge'
+              ELSE status END, updated_at=NOW()
+            WHERE status='waiting_bridge' OR (status='in_transit' AND crosses_twins=TRUE)
+        """,queue_rule,blocked,mode)
         await conn.execute("INSERT INTO audit_logs(actor_id,action,target_type,details) VALUES($1,'twins_bridge_policy','twins_bridge',$2::jsonb)",
             player["id"],json.dumps({"mode":mode,"blocked_house_ids":blocked,"queue_rule":queue_rule}))
     return web.json_response({"ok":True,"mode":mode,"blocked_house_ids":blocked,"queue_rule":queue_rule})
