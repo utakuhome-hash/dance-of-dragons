@@ -3870,7 +3870,7 @@ async def on_startup(app):
             'aegon ii targaryen','aemond targaryen','daeron targaryen',
             'alf white','ulf white','daemon targaryen','jacaerys velaryon',
             'hugh hammer','corlys velaryon','adam velaryon','addam velaryon',
-            'alyn velaryon','bartimos celtigar','lord reynald darklyn',
+            'alyn velaryon','bartimos celtigar','lord reynald darklyn','ynald darklyn',
             'criston cole','arryk cargyll','erryk cargyll','ser luthor largent',
             'lorent marbrand','willam royce','steffon darklyn',
             'otto hightower','gwayne hightower','orwyle','tyland lannister',
