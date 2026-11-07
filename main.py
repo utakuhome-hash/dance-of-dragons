@@ -3174,8 +3174,9 @@ ROAD_ALIASES = {
     "pyke":"پایک", "پایک":"پایک",
 }
 def _road_key(value):
-    raw = str(value or "").strip().replace("‌", " ").lower()
-    return ROAD_ALIASES.get(raw, ROAD_ALIASES.get(raw.replace(" ", ""), raw))
+    raw = str(value or "").strip().replace("‌", "").replace(" ", "").lower()
+    aliases = {str(k).replace("‌", "").replace(" ", "").lower(): v for k, v in ROAD_ALIASES.items()}
+    return aliases.get(raw, raw)
 def _road_graph():
     graph = {}
     for left, right in ROAD_EDGES:
