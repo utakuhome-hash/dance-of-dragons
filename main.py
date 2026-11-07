@@ -3621,10 +3621,26 @@ async def admin_assign_profile_owner_handler(request):
     return web.json_response({"ok": True, "profile": dict(updated)})
 
 
-async def index_handler(request):
-    # Always revalidate the game shell so embedded browsers do not keep an old menu/pages bundle.
+async def marriage_asset_handler(request):
     return web.FileResponse(
-        WEBAPP_FILE,
+        BASE_DIR / "static" / "marriage.js",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+async def index_handler(request):
+    # Inject the marriage entry point without rewriting the large existing game shell.
+    html = WEBAPP_FILE.read_text(encoding="utf-8")
+    script_tag = '<script src="/marriage.js?v=1" defer></script>'
+    if script_tag not in html:
+        if "</body>" in html:
+            html = html.replace("</body>", script_tag + "</body>", 1)
+        else:
+            html += script_tag
+    return web.Response(
+        text=html,
+        content_type="text/html",
+        charset="utf-8",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -4399,6 +4415,7 @@ def create_app():
     app.router.add_get("/app-v3", index_handler)
     app.router.add_get("/play-v4", index_handler)
     app.router.add_get("/play-v5", index_handler)
+    app.router.add_get("/marriage.js", marriage_asset_handler)
 
     app.router.add_post("/api/auth/telegram", auth_handler)
     app.router.add_post("/api/auth/desktop/request", desktop_login_request_handler)
