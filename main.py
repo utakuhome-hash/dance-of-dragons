@@ -3017,6 +3017,60 @@ def _settle_house_build_queue(state, now_ms):
     return changed
 
 
+def _settle_food_spoilage(state, now=None):
+    """Persist real-time food aging; one salt preserves 100 food permanently."""
+    from datetime import datetime, timezone, timedelta
+    now = now or datetime.now(timezone.utc)
+    resources = state.setdefault("resources", {})
+    special = resources.setdefault("specialGoods", {})
+    try:
+        food = max(0, int(resources.get("food", 0) or 0))
+        salt = max(0, int(special.get("salt", 0) or 0))
+        protected = max(0, int(state.get("_saltedFood", 0) or 0))
+    except (TypeError, ValueError):
+        return False
+    protected = min(protected, food)
+    unprotected = max(0, food - protected)
+    changed = False
+    started = state.get("_foodSpoilageAt")
+    if unprotected and not started:
+        state["_foodSpoilageAt"] = now.isoformat()
+        changed = True
+        started = state["_foodSpoilageAt"]
+    if not unprotected:
+        if started:
+            state["_foodSpoilageAt"] = None
+            changed = True
+        if protected != int(state.get("_saltedFood", 0) or 0):
+            state["_saltedFood"] = protected
+            changed = True
+        return changed
+    try:
+        started_at = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        started_at = now
+        state["_foodSpoilageAt"] = now.isoformat()
+        changed = True
+    if now - started_at < timedelta(hours=48):
+        if protected != int(state.get("_saltedFood", 0) or 0):
+            state["_saltedFood"] = protected
+            changed = True
+        return changed
+    preserved = min(unprotected, salt * 100)
+    salt_used = (preserved + 99) // 100
+    spoiled = unprotected - preserved
+    if preserved:
+        state["_saltedFood"] = protected + preserved
+        special["salt"] = salt - salt_used
+    resources["food"] = food - spoiled
+    state["_foodSpoilageAt"] = None
+    state["resources"] = resources
+    changed = True
+    return changed
+
+
 def _apply_house_annual_income(state, elapsed, special_region=None):
     resources = state.setdefault("resources", {})
     special = resources.setdefault("specialGoods", {})
@@ -3114,14 +3168,16 @@ async def _settle_all_house_annual_income(conn, game_year):
         state = _json_object(row["game_state"])
         house_resources = _json_object(row["resources"])
         state["resources"] = _canonical_house_resources(house_resources, state.get("resources"))
+        food_changed = _settle_food_spoilage(state)
         last_year = int(state.get("_lastIncomeYear", 129) or 129)
         elapsed = max(0, int(game_year) - last_year)
-        if not elapsed:
+        if not elapsed and not food_changed:
             continue
-        state = _apply_house_annual_income(
-            state, elapsed, _house_special_region(row["name"])
-        )
-        state["_lastIncomeYear"] = int(game_year)
+        if elapsed:
+            state = _apply_house_annual_income(
+                state, elapsed, _house_special_region(row["name"])
+            )
+            state["_lastIncomeYear"] = int(game_year)
         resources = state.get("resources") or {}
         special = resources.get("specialGoods") or {}
         for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
@@ -3168,6 +3224,7 @@ async def my_house_state_handler(request):
                 )
             clock = await read_game_clock(conn)
             changed = False
+            changed = _settle_food_spoilage(state) or changed
             if clock:
                 if clock.get("is_running"):
                     import time
