@@ -3367,6 +3367,46 @@ async def espionage_infiltrate_handler(request):
     })
 
 
+async def admin_mail_letters_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        limit = min(500, max(1, int(request.query.get("limit", "300"))))
+    except ValueError:
+        return json_error("invalid_pagination")
+    async with request.app["db"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT l.id, l.subject, l.body, l.category, l.is_anonymous,
+                   l.created_at, l.read_at,
+                   sender.id AS sender_player_id,
+                   sender.username AS sender_username,
+                   sender.telegram_id AS sender_telegram_id,
+                   recipient.id AS recipient_player_id,
+                   recipient.username AS recipient_username,
+                   recipient.telegram_id AS recipient_telegram_id
+            FROM game_letters l
+            JOIN players sender ON sender.id = l.sender_player_id
+            JOIN players recipient ON recipient.id = l.recipient_player_id
+            ORDER BY l.created_at DESC, l.id DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    letters = []
+    for row in rows:
+        item = dict(row)
+        for field in ("created_at", "read_at"):
+            if item.get(field) is not None:
+                item[field] = item[field].isoformat()
+        item["id"] = int(item["id"])
+        item["sender_player_id"] = int(item["sender_player_id"])
+        item["recipient_player_id"] = int(item["recipient_player_id"])
+        letters.append(item)
+    return web.json_response({"ok": True, "letters": letters, "count": len(letters)})
+
+
 async def mail_list_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player["is_active"]:
@@ -5143,6 +5183,7 @@ def create_app():
     app.router.add_get("/api/espionage", espionage_overview_handler)
     app.router.add_post("/api/espionage/infiltrate", espionage_infiltrate_handler)
     app.router.add_get("/api/mail/players", mail_players_handler)
+    app.router.add_get("/api/admin/mail", admin_mail_letters_handler)
     app.router.add_get("/api/mail", mail_list_handler)
     app.router.add_get("/api/mail/unread-count", mail_unread_count_handler)
     app.router.add_post("/api/mail", mail_send_handler)
