@@ -2983,8 +2983,8 @@ async def mail_send_handler(request):
     if recipient_telegram_id:
         sender_label = "یک فرستنده ناشناس" if is_anonymous else str(player["username"])
         notification_text = (
-            f"✉️ نامه تازه‌ای دریافت کردی!\\n\\n"
-            f"از طرف «{sender_label}» برایت نامه ارسال شده است.\\n"
+            f"✉️ نامه تازه‌ای دریافت کردی!\n\n"
+            f"از طرف «{sender_label}» برایت نامه ارسال شده است.\n"
             f"برای خواندن نامه وارد بازی شو و بخش «نامه‌ها» را باز کن."
         )
         notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
