@@ -1734,6 +1734,7 @@ async def wedding_gift_handler(request):
         async with conn.transaction():
             invite=await conn.fetchrow("""
                 SELECT wi.*,m.groom_player_id,m.bride_player_id,m.ceremony_level,
+                       m.ceremony_status,
                        gp.character_name AS groom_name,bp.character_name AS bride_name
                 FROM wedding_invitations wi JOIN marriages m ON m.id=wi.marriage_id
                 JOIN character_profiles gp ON gp.id=m.groom_profile_id
@@ -1744,8 +1745,12 @@ async def wedding_gift_handler(request):
                 return json_error("invitation_not_found",404)
             if invite["response"]=="declined":
                 return json_error("invitation_declined")
+            if invite["response"]!="attending":
+                return json_error("accept_invitation_before_gifting")
             if not invite["ceremony_level"]:
                 return json_error("ceremony_not_selected")
+            if invite["ceremony_status"] not in ("scheduled","live"):
+                return json_error("wedding_not_open_for_gifts")
             groom_house_id=await conn.fetchval("SELECT house_id FROM players WHERE id=$1",invite["groom_player_id"])
             if not groom_house_id:
                 return json_error("groom_has_no_house")
