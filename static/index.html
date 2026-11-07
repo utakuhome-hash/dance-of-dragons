@@ -743,7 +743,10 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
     const deviceText=(p.last_user_agent||'دستگاه ثبت نشده').slice(0,180);
     const loginText=p.last_login_at?new Date(p.last_login_at).toLocaleString('fa-IR'):'ورود ثبت نشده';
     const installText=p.last_install_id?'…'+String(p.last_install_id).slice(-8):'ثبت نشده';
-    const sameDevice=(p.install_accounts||[]).map(x=>x.username+' (#'+x.id+')').join('، ');
+    let linkedAccounts=p.install_accounts;
+    if(typeof linkedAccounts==='string'){try{linkedAccounts=JSON.parse(linkedAccounts);}catch(_){linkedAccounts=[];}}
+    if(!Array.isArray(linkedAccounts))linkedAccounts=[];
+    const sameDevice=linkedAccounts.map(x=>(x.username||'بدون نام')+' (#'+x.id+')').join('، ');
     const activityText=p.last_activity_at?new Date(p.last_activity_at).toLocaleString('fa-IR'):'فعالیتی ثبت نشده';
     const presenceText=p.is_online?'🟢 آنلاین':'⚪ آفلاین';
     accessInfo.textContent=presenceText+' · آخرین فعالیت: '+activityText+' · آخرین ورود: '+loginText+' · IP: '+(p.last_ip_address||'ثبت نشده')+' · Device: '+deviceText+' · شناسه نصب: '+installText+' · تعداد اکانت‌های همین گوشی: '+Number(p.install_account_count||0)+' · اکانت‌های همین گوشی: '+(sameDevice||'هنوز اکانت دیگری با این شناسه ثبت نشده')+' · اکانت‌های همین IP در ۳۰ روز: '+Number(p.ip_account_count||0);
