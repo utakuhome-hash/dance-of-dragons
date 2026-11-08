@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.venv
+.venv-*
+__pycache__
+*.py[cod]
+*.backup
+*.patch
+count_trades.py
+inspect_*.py
+test_db.py
