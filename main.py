@@ -4143,6 +4143,124 @@ def _canonical_house_resources(house_resources, game_resources):
     return result
 
 
+async def _settle_trade_contracts(conn, game_year):
+    """Deliver accepted trade contracts once per game year, atomically per installment."""
+    import json
+
+    item_keys = {
+        "چوب": "wood", "سنگ": "stone", "آهن": "iron", "غذا": "food",
+        "اسب جنگی": "warhorses", "خز": "fur", "پشم": "wool",
+        "شراب": "wine", "ادویه": "spice", "نمک": "salt", "آهن سیاه": "blackIron",
+    }
+    special_keys = {"fur", "wool", "wine", "spice", "salt", "blackIron"}
+    house_cache = {}
+
+    contracts = await conn.fetch("""
+        SELECT id, proposer_house_id, recipient_house_id,
+               offered_item, offered_quantity, requested_item, requested_quantity,
+               start_year, end_year, last_settled_year
+        FROM trade_contracts
+        WHERE status='accepted' AND start_year IS NOT NULL AND end_year IS NOT NULL
+          AND last_settled_year < LEAST($1, end_year)
+        ORDER BY id
+        FOR UPDATE
+    """, int(game_year))
+
+    for contract in contracts:
+        proposer_id = int(contract["proposer_house_id"])
+        recipient_id = int(contract["recipient_house_id"])
+        for house_id in sorted({proposer_id, recipient_id}):
+            if house_id not in house_cache:
+                row = await conn.fetchrow("""
+                    SELECT id, game_state, resources FROM houses
+                    WHERE id=$1 FOR UPDATE
+                """, house_id)
+                if not row:
+                    house_cache[house_id] = None
+                    continue
+                state = _json_object(row["game_state"])
+                stored = _json_object(row["resources"])
+                resources = _canonical_house_resources(stored, state.get("resources"))
+                state["resources"] = resources
+                house_cache[house_id] = {"state": state, "stored": stored, "resources": resources}
+
+        proposer = house_cache.get(proposer_id)
+        recipient = house_cache.get(recipient_id)
+        if not proposer or not recipient:
+            await conn.execute("UPDATE trade_contracts SET status='breached' WHERE id=$1", contract["id"])
+            break
+
+        offered_key = item_keys.get(str(contract["offered_item"]))
+        requested_key = item_keys.get(str(contract["requested_item"]))
+        if not offered_key or not requested_key:
+            await conn.execute("UPDATE trade_contracts SET status='breached' WHERE id=$1", contract["id"])
+            continue
+
+        last_year = max(int(contract["last_settled_year"] or contract["start_year"]),
+                        int(contract["start_year"]))
+        due_until = min(int(game_year), int(contract["end_year"]))
+        for delivery_year in range(last_year + 1, due_until + 1):
+            p_res = proposer["resources"]
+            r_res = recipient["resources"]
+
+            def read_stock(resources, key):
+                if key in special_keys:
+                    return max(0, int((resources.get("specialGoods") or {}).get(key, 0) or 0))
+                return max(0, int(resources.get(key, 0) or 0))
+
+            offered_amount = int(contract["offered_quantity"])
+            requested_amount = int(contract["requested_quantity"])
+            if (read_stock(p_res, offered_key) < offered_amount or
+                    read_stock(r_res, requested_key) < requested_amount):
+                await conn.execute(
+                    "UPDATE trade_contracts SET status='breached' WHERE id=$1",
+                    contract["id"],
+                )
+                break
+
+            def change_stock(resources, key, delta):
+                if key in special_keys:
+                    special = resources.setdefault("specialGoods", {})
+                    special[key] = read_stock(resources, key) + delta
+                else:
+                    resources[key] = read_stock(resources, key) + delta
+
+            change_stock(p_res, offered_key, -offered_amount)
+            change_stock(r_res, offered_key, offered_amount)
+            change_stock(r_res, requested_key, -requested_amount)
+            change_stock(p_res, requested_key, requested_amount)
+
+            for house_id, cached in ((proposer_id, proposer), (recipient_id, recipient)):
+                state = cached["state"]
+                resources = cached["resources"]
+                stored = cached["stored"]
+                state["resources"] = resources
+                for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+                    if key in resources:
+                        stored[key] = resources[key]
+                special = resources.get("specialGoods") or {}
+                for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                                       ("spice", "spice"), ("salt", "salt"),
+                                       ("blackIron", "black_iron")):
+                    if source in special:
+                        stored[target] = special[source]
+                await conn.execute("""
+                    UPDATE houses
+                    SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW()
+                    WHERE id=$3
+                """, json.dumps(state, ensure_ascii=False),
+                     json.dumps(stored, ensure_ascii=False), house_id)
+
+            status = "completed" if delivery_year >= int(contract["end_year"]) else "accepted"
+            await conn.execute("""
+                UPDATE trade_contracts
+                SET last_settled_year=$1, status=$2
+                WHERE id=$3
+            """, delivery_year, status, contract["id"])
+            if status == "completed":
+                break
+
+
 async def _settle_all_house_annual_income(conn, game_year):
     import json
     rows = await conn.fetch(
@@ -4189,6 +4307,7 @@ async def _settle_all_house_annual_income(conn, game_year):
             row["id"],
         )
         settled += 1
+    await _settle_trade_contracts(conn, int(game_year))
     return settled
 
 
