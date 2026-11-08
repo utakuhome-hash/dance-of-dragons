@@ -3969,7 +3969,11 @@ def _house_special_region(house_name):
         "تایرل":"reach", "ردواین":"reach", "های‌تاور":"reach", "تارلی":"reach",
         "مارتل":"dorne", "مارتل‌ها":"dorne", "دین":"dorne", "یرونوود":"dorne", "آلیرین":"dorne", "فاولر":"dorne",
     }
-    return regions.get(name)
+    normalized_regions = {
+        key.replace("\u200c", "").replace(" ", ""): value
+        for key, value in regions.items()
+    }
+    return normalized_regions.get(name)
 
 
 def _settle_house_build_queue(state, now_ms):
