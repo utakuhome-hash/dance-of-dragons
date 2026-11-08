@@ -493,6 +493,45 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
   body .shell > nav.nav > button,
   body .shell > nav.nav > button[data-page] { height: 41px !important; min-height: 41px !important; max-height: 41px !important; }
 }
+
+/* Compact expandable two-row bottom navigation */
+@media screen and (max-width:700px){
+ html body .shell{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px))!important}
+ html body .shell > nav.nav{
+  display:grid!important;grid-template-columns:repeat(8,minmax(0,1fr))!important;
+  grid-template-rows:48px!important;grid-auto-rows:48px!important;
+  gap:3px!important;height:auto!important;max-height:none!important;
+  overflow:hidden!important;padding:5px 5px calc(5px + env(safe-area-inset-bottom,0px))!important;
+  transition:max-height .22s ease!important;
+ }
+ html body .shell > nav.nav > button[data-page]{
+  display:flex!important;height:48px!important;min-height:48px!important;max-height:48px!important;
+  width:100%!important;min-width:0!important;max-width:none!important;padding:2px 1px!important;
+  gap:2px!important;overflow:hidden!important;
+ }
+ html body .shell > nav.nav > button[data-page] .nav-icon,
+ html body .shell > nav.nav > button[data-page] .nav-art{
+  width:23px!important;height:23px!important;max-width:23px!important;max-height:23px!important;flex:0 0 23px!important;
+ }
+ html body .shell > nav.nav > button[data-page] > span{
+  width:100%!important;max-width:100%!important;font:600 8px/1.1 Tahoma,Arial,sans-serif!important;
+  overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;
+ }
+ html body .shell > nav.nav:not(.nav-expanded) > button[data-page]:nth-of-type(n+8){display:none!important}
+ html body .shell > nav.nav.nav-expanded{grid-template-rows:repeat(2,48px)!important;overflow:visible!important}
+ html body .shell > nav.nav.nav-expanded > button[data-page]{display:flex!important}
+ html body .shell > nav.nav > button.nav-expand-toggle{
+  display:flex!important;position:absolute!important;top:-31px!important;right:8px!important;z-index:100001!important;
+  width:auto!important;min-width:76px!important;height:27px!important;min-height:27px!important;
+  padding:3px 10px!important;border:1px solid #c49a50!important;border-radius:10px 10px 0 0!important;
+  background:linear-gradient(145deg,#594225,#211a14)!important;color:#ffe3a0!important;
+  font:600 10px Tahoma,Arial,sans-serif!important;box-shadow:0 -3px 10px #0008!important;
+ }
+ html body .shell > nav.nav.nav-expanded{padding-top:5px!important}
+ html body .shell:has(> nav.nav.nav-expanded){padding-bottom:calc(126px + env(safe-area-inset-bottom,0px))!important}
+ html body .shell > .frame-wrap > .frame{height:calc(100dvh - 66px - 76px - env(safe-area-inset-bottom,0px))!important;min-height:360px!important}
+ html body .shell:has(> nav.nav.nav-expanded) > .frame-wrap > .frame{height:calc(100dvh - 66px - 126px - env(safe-area-inset-bottom,0px))!important}
+}
 </style><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body>
 <div id="authGate" dir="rtl">
   <div class="auth-card">
@@ -1240,6 +1279,18 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   catch(e){const map={telegram_id_exists:'این Telegram ID قبلاً ثبت شده است.',invalid_telegram_id:'Telegram ID معتبر نیست.',invalid_profile_id:'شخصیت انتخاب‌شده معتبر نیست.',profile_already_assigned:'این شخصیت قبلاً به یک بازیکن اختصاص داده شده است.',profile_not_found:'شخصیت پیدا نشد.',forbidden:'فقط سوپرادمین اجازه دارد.'};f.textContent=map[e.message]||e.message;}
  };
  retry.onclick=login;login();
+})();
+</script>
+
+<script>
+(()=>{
+ const nav=document.querySelector('.shell > nav.nav');
+ if(!nav||nav.querySelector('.nav-expand-toggle'))return;
+ const toggle=document.createElement('button');
+ toggle.type='button';toggle.className='nav-expand-toggle';toggle.setAttribute('aria-expanded','false');
+ const update=()=>{const open=nav.classList.contains('nav-expanded');toggle.textContent=open?'▲ بستن':'▼ بیشتر';toggle.setAttribute('aria-expanded',String(open));};
+ toggle.addEventListener('click',()=>{nav.classList.toggle('nav-expanded');update();});
+ nav.append(toggle);update();
 })();
 </script>
 </body></html>
