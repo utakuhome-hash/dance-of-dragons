@@ -521,7 +521,7 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
    <label>Telegram ID عددی</label><input id="newTelegramId" inputmode="numeric" pattern="[0-9]+" required>
    <label for="newCharacterProfile">انتخاب کرکتر از فهرست کامل شخصیت‌ها</label><select id="newCharacterProfile" required style="width:100%;padding:11px;border-radius:8px;border:1px solid #78603c;background:#100e0c;color:#fff;font:14px Tahoma"><option value="">در حال دریافت فهرست شخصیت‌ها…</option></select><small style="display:block;color:#c9bda7;margin-top:5px">شخصیت موردنظر را از فهرست انتخاب کن.</small>
    <button type="submit">افزودن بازیکن</button><div id="adminFeedback" role="status"></div>
-  </form><hr><h3>بازیکن‌های ثبت‌شده</h3><button type="button" id="refreshPlayers">به‌روزرسانی فهرست و آنلاین‌ها</button><div id="playersList">در حال دریافت…</div>
+  </form><hr><h3>بازیکن‌های ثبت‌شده</h3><button type="button" id="refreshPlayers">به‌روزرسانی فهرست و آنلاین‌ها</button><div id="playersList">در حال دریافت…</div><section id="adminPlayerPanelView" hidden style="margin:12px 0;padding:12px;border:1px solid #b18a4a;border-radius:12px;background:#15120e"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><strong id="adminPlayerPanelTitle">پنل بازیکن</strong><button type="button" id="closeAdminPlayerPanel">بستن</button></div><p style="font-size:12px;color:#c9bda7">حالت فقط مشاهده است؛ هیچ داده‌ای از این بخش تغییر نمی‌کند.</p><div id="adminPlayerPanelContent"></div></section>
  <hr><h3>📱 حساب‌های مشترک روی یک دستگاه</h3><p style="font-size:12px;color:#c9bda7;line-height:1.8">فقط گروه‌هایی نمایش داده می‌شوند که یک شناسهٔ نصب مشترک بین بیش از یک حساب ثبت شده باشد. شناسهٔ کوتاه‌شده نمایش داده می‌شود.</p><button type="button" id="refreshDeviceGroups">به‌روزرسانی گزارش دستگاه‌ها</button><div id="deviceGroupsList">در حال دریافت…</div>
  <hr><h3>🏰 مدیریت اقتصاد خاندان‌ها</h3>
  <p style="font-size:12px;color:#c9bda7;line-height:1.8">دارایی فعلی و درآمد سالانهٔ هر خاندان را جداگانه ویرایش کن. اعداد به‌صورت مستقل برای همان خاندان ذخیره می‌شوند.</p>
@@ -1003,6 +1003,33 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
   select.onchange=draw;draw();
  }
 
+ async function openAdminPlayerPanel(player){
+  const panel=document.getElementById('adminPlayerPanelView');
+  const title=document.getElementById('adminPlayerPanelTitle');
+  const content=document.getElementById('adminPlayerPanelContent');
+  if(!panel||!content)return;
+  panel.hidden=false;title.textContent='پنل بازیکن: '+(player.username||'بدون نام')+' (#'+player.id+')';
+  content.textContent='در حال دریافت اطلاعات کامل پنل…';
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  try{
+   const data=await api('/api/admin/players/'+encodeURIComponent(player.id)+'/panel');
+   content.replaceChildren();
+   const sections=[
+    ['اطلاعات حساب',data.player],
+    ['قلمرو، منابع، ساختمان‌ها و صف ساخت',data.house],
+    ['شخصیت‌های اختصاص‌یافته و ویژگی‌ها',data.profiles]
+   ];
+   sections.forEach(([label,value])=>{
+    const details=document.createElement('details');details.open=true;details.style.cssText='margin:8px 0;padding:8px;border:1px solid #5e4b30;border-radius:8px';
+    const summary=document.createElement('summary');summary.textContent=label;summary.style.cursor='pointer';
+    const pre=document.createElement('pre');pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;direction:ltr;text-align:left;font:12px/1.7 monospace;color:#f4e5c5;max-height:420px;overflow:auto';
+    pre.textContent=value==null?'اطلاعاتی ثبت نشده است.':JSON.stringify(value,null,2);
+    details.append(summary,pre);content.append(details);
+   });
+  }catch(e){content.textContent='دریافت پنل بازیکن ناموفق بود: '+e.message;}
+ }
+ document.getElementById('closeAdminPlayerPanel')?.addEventListener('click',()=>{document.getElementById('adminPlayerPanelView').hidden=true;});
+
  async function loadPlayers(){
   const list=document.getElementById('playersList');list.textContent='در حال دریافت…';
   try{
@@ -1119,7 +1146,8 @@ const pages={"dashboard":"<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head
      }catch(e){characterStatus.textContent='افزودن کرکتر ناموفق بود: '+e.message;}
      finally{addCharacter.disabled=false;}
     };
-    row.append(n,i,accessInfo,characterLabel,characterSelect,addCharacter,characterStatus,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
+    const inspectBtn=document.createElement('button');inspectBtn.type='button';inspectBtn.textContent='مشاهده پنل بازیکن';inspectBtn.style.cssText='margin:6px 0;border:1px solid #c49a50;background:#302414;color:#ffe3a0;border-radius:8px;padding:8px 12px';inspectBtn.onclick=()=>openAdminPlayerPanel(p);
+    row.append(n,i,accessInfo,inspectBtn,characterLabel,characterSelect,addCharacter,characterStatus,select,status,castleSelect,castleStatus,roleSelect,roleStatus,idBox,saveId,idStatus,activeBtn,activeStatus);list.append(row);
    });
    if(!d.players.length)list.textContent='هنوز بازیکنی ثبت نشده است.';
    if(!h.houses.length)list.append('فهرست خاندان‌ها خالی است.');
