@@ -4081,8 +4081,8 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
     upkeep = ((subjects + 9) // 10 + (soldiers + 9) // 10) * elapsed
     regional_bonus = {
         "west": {"coins": 1.5},
-        "reach": {"food": 1.5},
-        "river": {"food": 1.5},
+        # Riverlands retain their regional fishing advantage without boosting farms.
+        "river": {"fishery": 1.5},
         "storm": {"wood": 1.5},
         "vale": {"stone": 1.5},
         "iron": {"iron": 1.5},
@@ -4092,7 +4092,12 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
     }.get(special_region, {})
     for name, key, base in standard:
         level = _level(buildings, name)
-        multiplier = regional_bonus.get("fishery", 1.0) if name == "ماهیگیری" else regional_bonus.get(key, 1.0)
+        if name == "ماهیگیری":
+            multiplier = regional_bonus.get("fishery", 1.0)
+        elif name == "مزرعه" and special_region == "reach":
+            multiplier = 1.3
+        else:
+            multiplier = regional_bonus.get(key, 1.0)
         totals[key] = totals.get(key, 0) + int(level * base * multiplier) * elapsed
     special_buildings = [
         ("north", "شکارگاه", "fur", [60,105,165,240,330]),
