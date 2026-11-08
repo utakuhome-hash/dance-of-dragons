@@ -4194,7 +4194,7 @@ async def _settle_trade_contracts(conn, game_year):
         recipient = house_cache.get(recipient_id)
         if not proposer or not recipient:
             await conn.execute("UPDATE trade_contracts SET status='breached' WHERE id=$1", contract["id"])
-            break
+            continue
 
         offered_key = item_keys.get(str(contract["offered_item"]))
         requested_key = item_keys.get(str(contract["requested_item"]))
