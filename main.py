@@ -4539,7 +4539,7 @@ async def admin_update_profile_handler(request):
         return json_error("invalid_owner")
     skill_data = data.get("skills") or {}
     skill_values = []
-    for key in ("warfare", "intelligence", "diplomacy", "management", "faith"):
+    for key in ("warfare", "strength", "skill", "intelligence", "strategy", "command", "charisma", "diplomacy", "management", "faith"):
         try:
             value = int(skill_data[key])
         except (KeyError, ValueError, TypeError):
