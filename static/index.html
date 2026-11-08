@@ -419,6 +419,80 @@ body{background:radial-gradient(ellipse at 50% -12%,#343344 0,#111722 42%,#070a1
   }
 }
 
+
+/* Final mobile viewport fix: reserve the full fixed navigation area */
+@media screen and (max-width: 600px) {
+  html, body { width: 100%; min-height: 100%; }
+  body .shell {
+    width: 100% !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+    padding-bottom: calc(190px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow: visible !important;
+  }
+  body .shell > .frame-wrap {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  body .shell > .frame-wrap > .frame {
+    display: block !important;
+    width: 100% !important;
+    height: calc(100dvh - 66px - 190px - env(safe-area-inset-bottom, 0px)) !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: auto !important;
+  }
+  body .shell > nav.nav {
+    position: fixed !important;
+    left: 0 !important; right: 0 !important; bottom: 0 !important;
+    width: 100% !important; max-width: 560px !important;
+    height: auto !important; min-height: 0 !important; max-height: none !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(4, 43px) !important;
+    grid-auto-rows: 43px !important;
+    gap: 3px !important;
+    padding: 5px 6px calc(5px + env(safe-area-inset-bottom, 0px)) !important;
+    margin: 0 auto !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    z-index: 99999 !important;
+    direction: rtl !important;
+  }
+  body .shell > nav.nav > button,
+  body .shell > nav.nav > button[data-page] {
+    display: flex !important;
+    width: 100% !important; min-width: 0 !important; max-width: none !important;
+    height: 43px !important; min-height: 43px !important; max-height: 43px !important;
+    margin: 0 !important; padding: 2px 1px !important;
+    position: relative !important; inset: auto !important; transform: none !important;
+    flex: none !important; flex-direction: column !important;
+    align-items: center !important; justify-content: center !important;
+    gap: 1px !important; overflow: hidden !important;
+  }
+  body .shell > nav.nav > button .nav-icon,
+  body .shell > nav.nav > button .nav-art,
+  body .shell > nav.nav > button .nav-emoji {
+    display: block !important; width: 21px !important; height: 21px !important;
+    max-width: 21px !important; max-height: 21px !important; flex: 0 0 21px !important;
+  }
+  body .shell > nav.nav > button > span {
+    display: block !important; width: 100% !important; max-width: 100% !important;
+    overflow: hidden !important; text-overflow: ellipsis !important;
+    white-space: nowrap !important; font: 600 8px/1.1 Tahoma, Arial, sans-serif !important;
+  }
+}
+@media screen and (max-width: 380px) {
+  body .shell { padding-bottom: calc(184px + env(safe-area-inset-bottom, 0px)) !important; }
+  body .shell > .frame-wrap > .frame {
+    height: calc(100dvh - 66px - 184px - env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body .shell > nav.nav { grid-template-rows: repeat(4, 41px) !important; grid-auto-rows: 41px !important; gap: 2px !important; }
+  body .shell > nav.nav > button,
+  body .shell > nav.nav > button[data-page] { height: 41px !important; min-height: 41px !important; max-height: 41px !important; }
+}
 </style><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body>
 <div id="authGate" dir="rtl">
   <div class="auth-card">
