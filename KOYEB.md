@@ -6,8 +6,9 @@ This branch is prepared for a single-container Python web service.
 
 - Build: Dockerfile at the repository root
 - Start: `python main.py`
-- The app binds to `0.0.0.0` and reads the platform-provided `PORT`.
-- The same aiohttp process serves the game API and Telegram webhook.
+- Expose port `8000` publicly over HTTP with route `/`.
+- Koyeb sets `PORT` to the lowest exposed port unless you override it; this app reads `PORT` and binds to `0.0.0.0`.
+- The same aiohttp process serves the game API and Telegram webhook; no separate worker process is required.
 
 ## Required environment variables
 
@@ -21,6 +22,6 @@ Keep using the existing production Neon database. Do not point this service at a
 
 After the public URL is assigned, set `WEBHOOK_BASE_URL` to that URL and redeploy so the app can register the Telegram webhook at `/telegram-webhook`.
 
-## Operational note
+## Free-tier limitations
 
-The app is a web service rather than a separate worker: it receives Telegram updates through its webhook route. Free compute tiers may scale to zero while idle, so cold starts and webhook delays are possible. Confirm provider limits and billing before treating a free instance as always-on production hosting.
+Koyeb's Free Instance is a single Web Service with limited CPU/RAM and scales to zero after one hour without incoming traffic. It is not an always-on production guarantee; cold starts can delay game requests and Telegram webhook handling. Check the current provider limits and billing before treating it as production hosting.
