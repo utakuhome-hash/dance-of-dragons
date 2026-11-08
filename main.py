@@ -4095,7 +4095,7 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
         if name == "ماهیگیری":
             multiplier = regional_bonus.get("fishery", 1.0)
         elif name == "مزرعه" and special_region == "reach":
-            multiplier = 1.3
+            multiplier = 1.5
         else:
             multiplier = regional_bonus.get(key, 1.0)
         totals[key] = totals.get(key, 0) + int(level * base * multiplier) * elapsed
