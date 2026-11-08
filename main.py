@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from dotenv import load_dotenv
 import time
 import hmac
 import hashlib
@@ -17,6 +18,8 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, MenuButtonWebApp
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+load_dotenv()
 
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
