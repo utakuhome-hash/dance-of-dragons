@@ -3505,17 +3505,23 @@ async def trade_contract_respond_handler(request):
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow("""
-                SELECT id, recipient_house_id, status FROM trade_contracts
+                SELECT id, recipient_house_id, status, duration_years FROM trade_contracts
                 WHERE id = $1 FOR UPDATE
             """, contract_id)
             if not row or int(row["recipient_house_id"]) != int(player["house_id"]):
                 return json_error("contract_not_found_or_not_for_house", 404)
             if row["status"] != "pending":
                 return json_error("contract_already_answered", 409)
+            clock = await read_game_clock(conn)
+            current_year = int((clock or {}).get("game_year") or 129)
             await conn.execute("""
                 UPDATE trade_contracts SET status = $1, recipient_player_id = $2,
-                    responded_at = NOW() WHERE id = $3
-            """, status, player["id"], contract_id)
+                    responded_at = NOW(),
+                    start_year = CASE WHEN $1='accepted' THEN $4 ELSE start_year END,
+                    end_year = CASE WHEN $1='accepted' THEN $4 + duration_years ELSE end_year END,
+                    last_settled_year = CASE WHEN $1='accepted' THEN $4 ELSE last_settled_year END
+                WHERE id = $3
+            """, status, player["id"], contract_id, current_year)
     return web.json_response({"ok": True, "status": status})
 
 
@@ -5425,6 +5431,22 @@ async def on_startup(app):
             )
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS trade_contracts_houses_idx ON trade_contracts (proposer_house_id, recipient_house_id, status, created_at DESC)")
+        await conn.execute("ALTER TABLE trade_contracts ADD COLUMN IF NOT EXISTS start_year INTEGER")
+        await conn.execute("ALTER TABLE trade_contracts ADD COLUMN IF NOT EXISTS end_year INTEGER")
+        await conn.execute("ALTER TABLE trade_contracts ADD COLUMN IF NOT EXISTS last_settled_year INTEGER NOT NULL DEFAULT 0")
+        await conn.execute("""
+            UPDATE trade_contracts
+            SET start_year = COALESCE(start_year, (SELECT game_year FROM game_clock WHERE id=1)),
+                end_year = COALESCE(end_year,
+                    COALESCE(start_year, (SELECT game_year FROM game_clock WHERE id=1)) + duration_years),
+                last_settled_year = CASE
+                    WHEN last_settled_year = 0
+                    THEN COALESCE(start_year, (SELECT game_year FROM game_clock WHERE id=1))
+                    ELSE last_settled_year
+                END
+            WHERE status='accepted'
+        """)
+
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS game_letters (
