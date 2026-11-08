@@ -4490,7 +4490,7 @@ async def profile_detail_handler(request):
         row = await conn.fetchrow("""
             SELECT id, character_name, biography, age, health, title, location,
                    spouse, gender, children, dragon, house, owner_player_id,
-                   warfare, intelligence, diplomacy, management, faith
+                   warfare, strength, skill, intelligence, strategy, command, charisma, diplomacy, management, faith
             FROM character_profiles WHERE id = $1
         """, profile_id)
     if not row:
@@ -4500,9 +4500,9 @@ async def profile_detail_handler(request):
     can_view_skills = is_admin or owner_id == player["id"]
     skills = None
     if can_view_skills:
-        skills = {key: data.pop(key) for key in ("warfare", "intelligence", "diplomacy", "management", "faith")}
+        skills = {key: data.pop(key) for key in ("warfare", "strength", "skill", "intelligence", "strategy", "command", "charisma", "diplomacy", "management", "faith")}
     else:
-        for key in ("warfare", "intelligence", "diplomacy", "management", "faith"):
+        for key in ("warfare", "strength", "skill", "intelligence", "strategy", "command", "charisma", "diplomacy", "management", "faith"):
             data.pop(key, None)
     data["skills"] = skills
     data["is_owner"] = owner_id == player["id"]
@@ -4556,9 +4556,10 @@ async def admin_update_profile_handler(request):
             UPDATE character_profiles SET
                 biography=$1, age=$2, health=$3, title=$4, location=$5,
                 spouse=$6, children=$7, dragon=$8, house=$9, owner_player_id=$10,
-                warfare=$11, intelligence=$12, diplomacy=$13, management=$14, faith=$15,
-                gender=$16, updated_at=NOW()
-            WHERE id=$17 RETURNING id, character_name, gender
+                warfare=$11, strength=$12, skill=$13, intelligence=$14, strategy=$15, command=$16, charisma=$17,
+                diplomacy=$18, management=$19, faith=$20,
+                gender=$21, updated_at=NOW()
+            WHERE id=$22 RETURNING id, character_name, gender
         """, *(values[k] for k in public_fields), owner_id, *skill_values, gender, profile_id)
     if not updated:
         return json_error("profile_not_found", 404)
@@ -4821,6 +4822,11 @@ async def on_startup(app):
                 house VARCHAR(180),
                 owner_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
                 warfare INTEGER NOT NULL DEFAULT 50 CHECK (warfare BETWEEN 0 AND 100),
+                strength INTEGER NOT NULL DEFAULT 50 CHECK (strength BETWEEN 0 AND 100),
+                skill INTEGER NOT NULL DEFAULT 50 CHECK (skill BETWEEN 0 AND 100),
+                strategy INTEGER NOT NULL DEFAULT 50 CHECK (strategy BETWEEN 0 AND 100),
+                command INTEGER NOT NULL DEFAULT 50 CHECK (command BETWEEN 0 AND 100),
+                charisma INTEGER NOT NULL DEFAULT 50 CHECK (charisma BETWEEN 0 AND 100),
                 intelligence INTEGER NOT NULL DEFAULT 50 CHECK (intelligence BETWEEN 0 AND 100),
                 diplomacy INTEGER NOT NULL DEFAULT 50 CHECK (diplomacy BETWEEN 0 AND 100),
                 management INTEGER NOT NULL DEFAULT 50 CHECK (management BETWEEN 0 AND 100),
@@ -4830,6 +4836,8 @@ async def on_startup(app):
             )
         """)
         await conn.execute("ALTER TABLE character_profiles ADD COLUMN IF NOT EXISTS gender VARCHAR(10) NOT NULL DEFAULT 'unknown'")
+        for stat in ("strength", "skill", "strategy", "command", "charisma"):
+            await conn.execute(f"ALTER TABLE character_profiles ADD COLUMN IF NOT EXISTS {stat} INTEGER NOT NULL DEFAULT 50 CHECK ({stat} BETWEEN 0 AND 100)")
         # Canonical gender tags for the named characters in the current roster.
         await conn.execute("""
             UPDATE character_profiles SET gender='female', updated_at=NOW()
