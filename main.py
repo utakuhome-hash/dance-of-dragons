@@ -4432,14 +4432,14 @@ async def profiles_list_handler(request):
     async with request.app["db"].acquire() as conn:
         if is_admin:
             rows = await conn.fetch("""
-                SELECT id, character_name, title, location, house, gender, owner_player_id
+                SELECT id, character_name, title, location, house, gender, dragon, owner_player_id
                 FROM character_profiles ORDER BY character_name
             """)
         else:
             # The personal profile section lists only characters assigned to this player.
             # Public biographies remain available through /api/profiles/public (court pages).
             rows = await conn.fetch("""
-                SELECT id, character_name, title, location, house, gender
+                SELECT id, character_name, title, location, house, gender, dragon
                 FROM character_profiles
                 WHERE owner_player_id = $1
                 ORDER BY character_name
