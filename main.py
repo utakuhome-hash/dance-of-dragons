@@ -3423,19 +3423,23 @@ async def trade_contracts_handler(request):
     if not player.get("house_id"):
         return json_error("player_has_no_house", 403)
     async with request.app["db"].acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT c.*, ph.name AS proposer_house_name, rh.name AS recipient_house_name,
-                   pp.username AS proposer_name, rp.username AS recipient_name,
-                   (c.proposer_house_id = $1) AS is_proposer_house,
-                   (c.recipient_house_id = $1) AS is_recipient_house
-            FROM trade_contracts c
-            JOIN houses ph ON ph.id = c.proposer_house_id
-            JOIN houses rh ON rh.id = c.recipient_house_id
-            JOIN players pp ON pp.id = c.proposer_player_id
-            LEFT JOIN players rp ON rp.id = c.recipient_player_id
-            WHERE c.proposer_house_id = $1 OR c.recipient_house_id = $1
-            ORDER BY c.created_at DESC LIMIT 100
-        """, player["house_id"])
+        async with conn.transaction():
+            clock = await read_game_clock(conn)
+            if clock:
+                await _settle_all_house_annual_income(conn, int(clock["game_year"]))
+            rows = await conn.fetch("""
+                SELECT c.*, ph.name AS proposer_house_name, rh.name AS recipient_house_name,
+                       pp.username AS proposer_name, rp.username AS recipient_name,
+                       (c.proposer_house_id = $1) AS is_proposer_house,
+                       (c.recipient_house_id = $1) AS is_recipient_house
+                FROM trade_contracts c
+                JOIN houses ph ON ph.id = c.proposer_house_id
+                JOIN houses rh ON rh.id = c.recipient_house_id
+                JOIN players pp ON pp.id = c.proposer_player_id
+                LEFT JOIN players rp ON rp.id = c.recipient_player_id
+                WHERE c.proposer_house_id = $1 OR c.recipient_house_id = $1
+                ORDER BY c.created_at DESC LIMIT 100
+            """, player["house_id"])
     contracts = []
     for row in rows:
         item = dict(row)
