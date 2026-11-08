@@ -2220,6 +2220,64 @@ async def logout_handler(request):
     return web.json_response({"ok": True})
 
 
+async def admin_player_panel_handler(request):
+    admin, error = await require_super_admin(request)
+    if error:
+        return error
+    try:
+        player_id = int(request.match_info["player_id"])
+    except (ValueError, TypeError):
+        return json_error("invalid_player_id")
+
+    async with request.app["db"].acquire() as conn:
+        player = await conn.fetchrow("""
+            SELECT id, username, telegram_id, role, house_id, castle_name,
+                   is_active, is_super_admin, created_at
+            FROM players WHERE id = $1
+        """, player_id)
+        if not player:
+            return json_error("player_not_found", 404)
+
+        house = None
+        if player["house_id"]:
+            house_row = await conn.fetchrow("""
+                SELECT id, name, castle, resources, game_state, game_state_updated_at
+                FROM houses WHERE id = $1
+            """, player["house_id"])
+            if house_row:
+                house = dict(house_row)
+                for key in ("resources", "game_state"):
+                    value = house.get(key)
+                    if isinstance(value, str):
+                        try:
+                            house[key] = json.loads(value)
+                        except (TypeError, ValueError):
+                            house[key] = {}
+                if house.get("game_state_updated_at"):
+                    house["game_state_updated_at"] = house["game_state_updated_at"].isoformat()
+
+        profiles = await conn.fetch("""
+            SELECT id, character_name, biography, age, health, title, location,
+                   spouse, gender, children, dragon, house, owner_player_id,
+                   warfare, strength, skill, intelligence, strategy, command,
+                   charisma, diplomacy, management, faith
+            FROM character_profiles
+            WHERE owner_player_id = $1
+            ORDER BY character_name
+        """, player_id)
+
+    player_data = dict(player)
+    if player_data.get("created_at"):
+        player_data["created_at"] = player_data["created_at"].isoformat()
+    return web.json_response({
+        "ok": True,
+        "player": player_data,
+        "house": house,
+        "profiles": [dict(row) for row in profiles],
+        "read_only": True,
+    }, dumps=lambda value: json.dumps(value, ensure_ascii=False, default=str))
+
+
 async def admin_players_handler(request):
     admin, error = await require_super_admin(request)
     if error:
@@ -5441,6 +5499,7 @@ def create_app():
     app.router.add_put("/api/admin/players/{player_id}/telegram-id", admin_update_player_telegram_id_handler)
     app.router.add_put("/api/admin/players/{player_id}/active", admin_set_player_active_handler)
     app.router.add_post("/api/logout", logout_handler)
+    app.router.add_get("/api/admin/players/{player_id}/panel", admin_player_panel_handler)
     app.router.add_get("/api/admin/players", admin_players_handler)
     app.router.add_get("/api/admin/device-groups", admin_device_groups_handler)
     app.router.add_get("/api/admin/login-requests", admin_login_requests_handler)
