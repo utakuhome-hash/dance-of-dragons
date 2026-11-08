@@ -4154,9 +4154,15 @@ async def _settle_all_house_annual_income(conn, game_year):
         house_resources = _json_object(row["resources"])
         state["resources"] = _canonical_house_resources(house_resources, state.get("resources"))
         food_changed = _settle_food_spoilage(state)
+        current_year = int(game_year)
         last_year = int(state.get("_lastIncomeYear", 129) or 129)
-        elapsed = max(0, int(game_year) - last_year)
-        if not elapsed and not food_changed:
+        # A clock rollback/reset must not leave the income marker in the future.
+        marker_corrected = last_year > current_year
+        if marker_corrected:
+            state["_lastIncomeYear"] = current_year
+            last_year = current_year
+        elapsed = max(0, current_year - last_year)
+        if not elapsed and not food_changed and not marker_corrected:
             continue
         if elapsed:
             state = _apply_house_annual_income(
@@ -4216,6 +4222,11 @@ async def my_house_state_handler(request):
                     changed = _settle_house_build_queue(state, time.time() * 1000) or changed
                 year = int(clock["game_year"])
                 last_year = int(state.get("_lastIncomeYear", 129) or 129)
+                # Keep a rolled-back game clock from blocking future annual income.
+                if last_year > year:
+                    state["_lastIncomeYear"] = year
+                    last_year = year
+                    changed = True
                 elapsed = max(0, year - last_year)
                 if elapsed:
                     state = _apply_house_annual_income(
