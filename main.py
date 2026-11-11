@@ -4174,10 +4174,49 @@ async def _settle_trade_contracts(conn, game_year):
     special_keys = {"fur", "wool", "wine", "spice", "salt", "blackIron"}
     house_cache = {}
 
+    async def persist_house(house_id, cached):
+        state = cached["state"]
+        resources = cached["resources"]
+        stored = cached["stored"]
+        state["resources"] = resources
+        for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
+            if key in resources:
+                stored[key] = resources[key]
+        special = resources.get("specialGoods") or {}
+        for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
+                               ("spice", "spice"), ("salt", "salt"),
+                               ("blackIron", "black_iron")):
+            if source in special:
+                stored[target] = special[source]
+        await conn.execute("""
+            UPDATE houses
+            SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW()
+            WHERE id=$3
+        """, json.dumps(state, ensure_ascii=False),
+             json.dumps(stored, ensure_ascii=False), house_id)
+
+    async def apply_breach_penalty(defaulter_id, beneficiary_id, amount):
+        if amount <= 0:
+            return
+        defaulter = house_cache.get(defaulter_id)
+        beneficiary = house_cache.get(beneficiary_id)
+        if not defaulter or not beneficiary:
+            return
+        available = max(0, int(defaulter["resources"].get("coins", 0) or 0))
+        paid = min(available, amount)
+        if paid <= 0:
+            return
+        defaulter["resources"]["coins"] = available - paid
+        beneficiary["resources"]["coins"] = max(
+            0, int(beneficiary["resources"].get("coins", 0) or 0)
+        ) + paid
+        await persist_house(defaulter_id, defaulter)
+        await persist_house(beneficiary_id, beneficiary)
+
     contracts = await conn.fetch("""
         SELECT id, proposer_house_id, recipient_house_id,
                offered_item, offered_quantity, requested_item, requested_quantity,
-               start_year, end_year, last_settled_year
+               penalty_coins, start_year, end_year, last_settled_year
         FROM trade_contracts
         WHERE status='accepted' AND start_year IS NOT NULL AND end_year IS NOT NULL
           AND last_settled_year < LEAST($1, end_year)
@@ -4229,12 +4268,22 @@ async def _settle_trade_contracts(conn, game_year):
 
             offered_amount = int(contract["offered_quantity"])
             requested_amount = int(contract["requested_quantity"])
-            if (read_stock(p_res, offered_key) < offered_amount or
-                    read_stock(r_res, requested_key) < requested_amount):
+            proposer_short = read_stock(p_res, offered_key) < offered_amount
+            recipient_short = read_stock(r_res, requested_key) < requested_amount
+            if proposer_short or recipient_short:
                 await conn.execute(
                     "UPDATE trade_contracts SET status='breached' WHERE id=$1",
                     contract["id"],
                 )
+                # If exactly one side cannot meet its annual delivery, collect
+                # the agreed penalty from that house and pay it to the other.
+                # Collection is capped at the defaulter's available coin balance.
+                if proposer_short != recipient_short:
+                    defaulter_id = proposer_id if proposer_short else recipient_id
+                    beneficiary_id = recipient_id if proposer_short else proposer_id
+                    await apply_breach_penalty(
+                        defaulter_id, beneficiary_id, int(contract["penalty_coins"] or 0)
+                    )
                 break
 
             def change_stock(resources, key, delta):
@@ -4250,25 +4299,7 @@ async def _settle_trade_contracts(conn, game_year):
             change_stock(p_res, requested_key, requested_amount)
 
             for house_id, cached in ((proposer_id, proposer), (recipient_id, recipient)):
-                state = cached["state"]
-                resources = cached["resources"]
-                stored = cached["stored"]
-                state["resources"] = resources
-                for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
-                    if key in resources:
-                        stored[key] = resources[key]
-                special = resources.get("specialGoods") or {}
-                for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                                       ("spice", "spice"), ("salt", "salt"),
-                                       ("blackIron", "black_iron")):
-                    if source in special:
-                        stored[target] = special[source]
-                await conn.execute("""
-                    UPDATE houses
-                    SET game_state=$1::jsonb, resources=$2::jsonb, game_state_updated_at=NOW()
-                    WHERE id=$3
-                """, json.dumps(state, ensure_ascii=False),
-                     json.dumps(stored, ensure_ascii=False), house_id)
+                await persist_house(house_id, cached)
 
             status = "completed" if delivery_year >= int(contract["end_year"]) else "accepted"
             await conn.execute("""
