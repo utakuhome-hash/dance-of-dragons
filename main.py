@@ -1631,7 +1631,7 @@ async def marriage_ceremony_handler(request):
                 "food":resources["food"],"subjects":resources.get("subjects",0),
                 "warhorses":resources.get("warhorses",0),
                 "fur":special.get("fur",0),"wool":special.get("wool",0),
-                "wine":special["wine"],"spice":special.get("spice",0),
+                "wine":special["wine"],"spice":special.get("spice",0),"herbs":special.get("herbs",0),
                 "salt":special.get("salt",0),"black_iron":special.get("blackIron",0),
             }
             state=_json_object(house["game_state"])
@@ -1758,7 +1758,7 @@ async def wedding_gift_handler(request):
                 return json_error("house_not_found")
             guest=_canonical_house_resources(_json_object(guest_house["resources"]),_json_object(guest_house["game_state"]).get("resources"))
             target=_canonical_house_resources(_json_object(target_house["resources"]),_json_object(target_house["game_state"]).get("resources"))
-            mapping={"سکه":("coins",None),"چوب":("wood",None),"سنگ":("stone",None),"آهن":("iron",None),"غذا":("food",None),"اسب جنگی":("warhorses",None),"خز":("specialGoods","fur"),"پشم":("specialGoods","wool"),"شراب":("specialGoods","wine"),"ادویه":("specialGoods","spice"),"آهن سیاه":("specialGoods","blackIron"),"نمک":("specialGoods","salt")}
+            mapping={"سکه":("coins",None),"چوب":("wood",None),"سنگ":("stone",None),"آهن":("iron",None),"غذا":("food",None),"اسب جنگی":("warhorses",None),"خز":("specialGoods","fur"),"پشم":("specialGoods","wool"),"شراب":("specialGoods","wine"),"ادویه":("specialGoods","spice"),"گیاه دارویی":("specialGoods","herbs"),"آهن سیاه":("specialGoods","blackIron"),"نمک":("specialGoods","salt")}
             key,sub=mapping[item]
             guest_bucket=guest[key] if sub else guest
             target_bucket=target[key] if sub else target
@@ -1776,7 +1776,7 @@ async def wedding_gift_handler(request):
                 return {"wood":r.get("wood",0),"stone":r.get("stone",0),"iron":r.get("iron",0),
                     "coins":r.get("coins",0),"food":r.get("food",0),"subjects":r.get("subjects",0),
                     "warhorses":r.get("warhorses",0),"fur":sp.get("fur",0),"wool":sp.get("wool",0),
-                    "wine":sp.get("wine",0),"spice":sp.get("spice",0),"salt":sp.get("salt",0),
+                    "wine":sp.get("wine",0),"spice":sp.get("spice",0),"herbs":sp.get("herbs",0),"salt":sp.get("salt",0),
                     "black_iron":sp.get("blackIron",0)}
             gs=_json_object(guest_house["game_state"]);ts=_json_object(target_house["game_state"])
             gs["resources"]=guest;ts["resources"]=target
@@ -2442,6 +2442,7 @@ async def admin_device_groups_handler(request):
     groups = []
     for row in rows:
         item = dict(row)
+        item["session_count"] = int(item["session_count"] or 0)
         item["device_key"] = str(item.pop("install_id"))[-8:]
         for field in ("first_seen_at", "last_seen_at"):
             if item.get(field) is not None:
@@ -2569,7 +2570,7 @@ async def admin_update_house_economy_handler(request):
     try:
         house_id = int(request.match_info["house_id"])
         data = await request.json()
-        allowed = {"wood","stone","iron","coins","food","subjects","warhorses","fur","wool","wine","spice","black_iron","salt"}
+        allowed = {"wood","stone","iron","coins","food","subjects","warhorses","fur","wool","wine","spice","herbs","black_iron","salt"}
         cleaned = []
         for field in ("resources", "annual_income"):
             source = data.get(field, {})
@@ -2769,11 +2770,11 @@ async def mail_players_handler(request):
 
 
 SEPT_ADMIN_TELEGRAM_ID = 8823771080
-SEPT_RESOURCE_KEYS = {"coins", "food", "wood", "stone", "iron", "wine", "salt", "fur", "wool", "spice", "black_iron"}
+SEPT_RESOURCE_KEYS = {"coins", "food", "wood", "stone", "iron", "wine", "salt", "fur", "wool", "spice", "herbs", "black_iron"}
 SEPT_RESOURCE_LABELS = {
     "coins": "سکه", "food": "غذا", "wood": "چوب", "stone": "سنگ",
     "iron": "آهن", "wine": "شراب", "salt": "نمک", "fur": "خز",
-    "wool": "پشم", "spice": "ادویه", "black_iron": "آهن سیاه",
+    "wool": "پشم", "spice": "ادویه", "herbs": "گیاه دارویی", "black_iron": "آهن سیاه",
 }
 SEPT_EXCLUDED_HOUSES = {
     "استارک", "کارستارک", "داستین", "آمبر", "گریجوی", "هارلاو",
@@ -2790,14 +2791,14 @@ def _sept_faith_for_house(name):
     return "ایمان هفت‌گانه"
 
 def _sept_resource_value(resources, key):
-    if key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+    if key in {"wine", "salt", "fur", "wool", "spice", "herbs", "black_iron"}:
         special = resources.get("specialGoods") if isinstance(resources.get("specialGoods"), dict) else {}
         mapped = "blackIron" if key == "black_iron" else key
         return max(0, int(special.get(mapped, 0) or 0))
     return max(0, int(resources.get(key, 0) or 0))
 
 def _sept_set_resource(resources, key, value):
-    if key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+    if key in {"wine", "salt", "fur", "wool", "spice", "herbs", "black_iron"}:
         special = resources.setdefault("specialGoods", {})
         special["blackIron" if key == "black_iron" else key] = int(value)
     else:
@@ -2902,7 +2903,7 @@ async def sept_donate_handler(request):
             if available < amount:
                 return json_error("not_enough_resources", 409)
             _sept_set_resource(resources, resource_key, available - amount)
-            if resource_key in {"wine", "salt", "fur", "wool", "spice", "black_iron"}:
+            if resource_key in {"wine", "salt", "fur", "wool", "spice", "herbs", "black_iron"}:
                 house_resources[resource_key] = available - amount
             else:
                 house_resources[resource_key] = available - amount
@@ -4110,6 +4111,7 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
         ("storm", "پرورشگاه اسب جنگی", "warhorses", [3,6,9,15,21]),
         ("dorne", "باغ ادویه", "spice", [60,105,165,240,345]),
         ("crown", "نمک‌زار", "salt", [90,165,255,375,510]),
+        ("river", "باغ گیاهان دارویی", "herbs", [60,105,165,240,330]),
         ("iron", "معدن آهن سیاه", "blackIron", [45,90,150,225,315]),
     ]
     for region, name, key, yields in special_buildings:
@@ -4150,11 +4152,11 @@ def _canonical_house_resources(house_resources, game_resources):
     except (TypeError, ValueError):
         pass
     special = {
-        "fur": 0, "wool": 0, "wine": 0, "spice": 0, "salt": 0, "blackIron": 0,
+        "fur": 0, "wool": 0, "wine": 0, "spice": 0, "herbs": 0, "salt": 0, "blackIron": 0,
     }
     special.update({k: v for k, v in legacy_special.items() if k != "warhorses"})
     for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                           ("spice", "spice"), ("salt", "salt"),
+                           ("spice", "spice"), ("herbs", "herbs"), ("salt", "salt"),
                            ("black_iron", "blackIron"), ("blackIron", "blackIron")):
         if source in house_resources:
             special[target] = house_resources[source]
@@ -4169,9 +4171,9 @@ async def _settle_trade_contracts(conn, game_year):
     item_keys = {
         "چوب": "wood", "سنگ": "stone", "آهن": "iron", "غذا": "food",
         "اسب جنگی": "warhorses", "خز": "fur", "پشم": "wool",
-        "شراب": "wine", "ادویه": "spice", "نمک": "salt", "آهن سیاه": "blackIron",
+        "شراب": "wine", "ادویه": "spice", "گیاه دارویی": "herbs", "نمک": "salt", "آهن سیاه": "blackIron",
     }
-    special_keys = {"fur", "wool", "wine", "spice", "salt", "blackIron"}
+    special_keys = {"fur", "wool", "wine", "spice", "herbs", "salt", "blackIron"}
     house_cache = {}
 
     async def persist_house(house_id, cached):
@@ -4184,7 +4186,7 @@ async def _settle_trade_contracts(conn, game_year):
                 stored[key] = resources[key]
         special = resources.get("specialGoods") or {}
         for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                               ("spice", "spice"), ("salt", "salt"),
+                               ("spice", "spice"), ("herbs", "herbs"), ("salt", "salt"),
                                ("blackIron", "black_iron")):
             if source in special:
                 stored[target] = special[source]
@@ -4343,7 +4345,7 @@ async def _settle_all_house_annual_income(conn, game_year):
             if key in resources:
                 house_resources[key] = resources[key]
         for key, source in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                            ("spice", "spice"), ("salt", "salt"), ("black_iron", "blackIron")):
+                            ("spice", "spice"), ("herbs", "herbs"), ("salt", "salt"), ("black_iron", "blackIron")):
             if source in special:
                 house_resources[key] = special[source]
         await conn.execute(
@@ -4410,7 +4412,7 @@ async def my_house_state_handler(request):
                     if key in resources:
                         house_resources[key] = resources[key]
                 for key, source in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                                    ("spice", "spice"), ("salt", "salt"), ("black_iron", "blackIron")):
+                                    ("spice", "spice"), ("herbs", "herbs"), ("salt", "salt"), ("black_iron", "blackIron")):
                     if source in special:
                         house_resources[key] = special[source]
                 await conn.execute(
@@ -4442,11 +4444,23 @@ async def my_house_state_update_handler(request):
                 raw = incoming["resources"][key]
                 if isinstance(raw, bool) or int(raw) < 0: return json_error("invalid_resource_amount")
                 incoming["resources"][key] = int(raw)
+        if not isinstance(incoming["resources"], dict) or not isinstance(incoming["buildings"], dict) or not isinstance(incoming["queue"], list): return json_error("invalid_state")
+        _sg = incoming["resources"].get("specialGoods")
+        if _sg is not None:
+            if not isinstance(_sg, dict): return json_error("invalid_state")
+            for _k in ("fur","wool","wine","spice","herbs","salt","blackIron"):
+                if _k in _sg:
+                    _raw = _sg[_k]
+                    if isinstance(_raw, bool) or int(_raw) < 0: return json_error("invalid_resource_amount")
+                    _sg[_k] = int(_raw)
         if len(incoming["queue"]) > 2: return json_error("invalid_build_queue")
     except (ValueError, TypeError):
         return json_error("invalid_state")
     async with request.app["db"].acquire() as conn:
         async with conn.transaction():
+            clock_row = await conn.fetchrow("SELECT is_running FROM game_clock WHERE id = 1")
+            if not clock_row or not clock_row["is_running"]:
+                return json_error("game_not_running", 403)
             row = await conn.fetchrow("SELECT game_state, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
             if not row: return json_error("house_not_found", 404)
             expected_updated_at = data.get("expected_updated_at")
@@ -4459,12 +4473,18 @@ async def my_house_state_update_handler(request):
                 "SELECT resources FROM houses WHERE id=$1", player["house_id"]
             ))
             resources = incoming["resources"]
+            import logging
+            for _k in ("wood","stone","iron","coins","food","subjects","warhorses"):
+                _new = resources.get(_k)
+                _old = int(house_resources.get(_k, 0) or 0)
+                if isinstance(_new, int) and _new > _old:
+                    logging.warning("RESOURCE_INCREASE player=%s house=%s %s %s->%s", player.get("id"), player["house_id"], _k, _old, _new)
             for key in ("wood", "stone", "iron", "coins", "food", "subjects", "warhorses"):
                 if key in resources:
                     house_resources[key] = resources[key]
             special = resources.get("specialGoods") if isinstance(resources.get("specialGoods"), dict) else {}
             for source, target in (("fur", "fur"), ("wool", "wool"), ("wine", "wine"),
-                                   ("spice", "spice"), ("salt", "salt"), ("blackIron", "black_iron")):
+                                   ("spice", "spice"), ("herbs", "herbs"), ("salt", "salt"), ("blackIron", "black_iron")):
                 if source in special:
                     house_resources[target] = special[source]
             await conn.execute(
@@ -4626,13 +4646,13 @@ async def admin_reset_economy_handler(request):
                 default_resources = {
                     **initial,
                     "specialGoods": {
-                        "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                        "fur": 0, "wool": 0, "wine": 0, "spice": 0, "herbs": 0,
                         "salt": 0, "blackIron": 0,
                     },
                 }
                 house_resources = {
                     **initial,
-                    "fur": 0, "wool": 0, "wine": 0, "spice": 0,
+                    "fur": 0, "wool": 0, "wine": 0, "spice": 0, "herbs": 0,
                     "salt": 0, "black_iron": 0,
                 }
                 default_state = {
@@ -4833,16 +4853,28 @@ async def admin_assign_profile_owner_handler(request):
     return web.json_response({"ok": True, "profile": dict(updated)})
 
 
+_INDEX_GZ_CACHE = {"mtime": None, "raw": b"", "gz": b""}
+
+
 async def index_handler(request):
     # Always revalidate the game shell so embedded browsers do not keep an old menu/pages bundle.
-    return web.FileResponse(
-        WEBAPP_FILE,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    # The 1MB shell is gzip-compressed once per file change to keep slow tunnels usable.
+    import gzip
+    headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Type": "text/html; charset=utf-8",
+        "Vary": "Accept-Encoding",
+    }
+    mtime = WEBAPP_FILE.stat().st_mtime
+    if _INDEX_GZ_CACHE["mtime"] != mtime:
+        raw = WEBAPP_FILE.read_bytes()
+        _INDEX_GZ_CACHE.update(mtime=mtime, raw=raw, gz=gzip.compress(raw, 6))
+    if "gzip" in request.headers.get("Accept-Encoding", "").lower():
+        headers["Content-Encoding"] = "gzip"
+        return web.Response(body=_INDEX_GZ_CACHE["gz"], headers=headers)
+    return web.Response(body=_INDEX_GZ_CACHE["raw"], headers=headers)
 
 
 async def on_startup(app):
@@ -4851,7 +4883,7 @@ async def on_startup(app):
         DATABASE_URL,
         min_size=1,
         max_size=5,
-        ssl="require",
+        ssl=(None if os.getenv("DB_SSL","require").strip().lower() in ("disable","off","false","0","no") else "require"),
     )
     db_pool = app["db"]
     async with app["db"].acquire() as conn:
@@ -5607,27 +5639,19 @@ async def on_startup(app):
         logging.exception("Could not update Telegram app menu button")
 
     try:
-        await bot.set_webhook(WEBHOOK_URL)
-    except TelegramRetryAfter as exc:
-        logging.warning(
-            "Telegram rate-limited setWebhook; retrying in %s seconds",
-            exc.retry_after,
-        )
-        await asyncio.sleep(exc.retry_after + 1)
-        try:
-            await bot.set_webhook(WEBHOOK_URL)
-        except Exception:
-            logging.exception(
-                "Could not set Telegram webhook after retry; web app will continue starting"
-            )
+        await bot.delete_webhook(drop_pending_updates=False)
     except Exception:
-        logging.exception(
-            "Could not set Telegram webhook; web app will continue starting"
-        )
+        logging.exception("Could not delete Telegram webhook")
+    app["polling_task"] = asyncio.create_task(
+        dp.start_polling(bot, handle_signals=False)
+    )
 
 
 async def on_cleanup(app):
     global db_pool
+    task = app.get("polling_task")
+    if task:
+        task.cancel()
     if app.get("db"):
         await app["db"].close()
     db_pool = None
