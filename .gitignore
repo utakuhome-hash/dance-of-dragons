@@ -17,3 +17,10 @@ fix_pages.py
 locate_err.py
 *.patch
 *.deb
+*.log
+startup-log.txt
+patch_*.py
+scan_js.py
+show_break.py
+test_db.py
+static/index.html.*
