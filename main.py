@@ -4430,6 +4430,8 @@ async def my_house_state_update_handler(request):
         return json_error("unauthorized", 401)
     if not player.get("house_id"):
         return json_error("house_not_assigned", 409)
+    import logging
+    logging.warning("PUT_STATE player=%s house=%s", player.get("id"), player.get("house_id"))
     import json
     try:
         data = await request.json()
@@ -4460,6 +4462,7 @@ async def my_house_state_update_handler(request):
         async with conn.transaction():
             clock_row = await conn.fetchrow("SELECT is_running FROM game_clock WHERE id = 1")
             if not clock_row or not clock_row["is_running"]:
+                logging.warning("PUT_STATE_BLOCKED game_not_running player=%s", player.get("id"))
                 return json_error("game_not_running", 403)
             row = await conn.fetchrow("SELECT game_state, game_state_updated_at FROM houses WHERE id=$1 FOR UPDATE", player["house_id"])
             if not row: return json_error("house_not_found", 404)
@@ -4496,17 +4499,39 @@ async def my_house_state_update_handler(request):
     return web.json_response({"ok": True, "updated_at": updated_at.isoformat() if updated_at else None})
 
 
+_CLOCK_SETTLE_LOCK = None
+_CLOCK_SETTLE_LAST = 0.0
+
+
 async def game_clock_handler(request):
     player = await get_authenticated_player(request)
     if not player or not player.get("is_active"):
         return json_error("unauthorized", 401)
+    import asyncio, time as _time
+    global _CLOCK_SETTLE_LOCK, _CLOCK_SETTLE_LAST
     async with request.app["db"].acquire() as conn:
-        async with conn.transaction():
-            clock = await read_game_clock(conn)
-            if clock:
-                await _settle_all_house_annual_income(conn, int(clock["game_year"]))
+        clock = await read_game_clock(conn)
     if not clock:
         return json_error("game_clock_unavailable", 503)
+    # Settlement locks every house row, so never do it on each poll:
+    # run it in the background at most once per 30 s, and answer immediately.
+    if _CLOCK_SETTLE_LOCK is None:
+        _CLOCK_SETTLE_LOCK = asyncio.Lock()
+    if not _CLOCK_SETTLE_LOCK.locked() and _time.monotonic() - _CLOCK_SETTLE_LAST >= 30:
+        _CLOCK_SETTLE_LAST = _time.monotonic()
+        year = int(clock["game_year"])
+        db = request.app["db"]
+
+        async def _bg_settle():
+            async with _CLOCK_SETTLE_LOCK:
+                try:
+                    async with db.acquire() as c2:
+                        async with c2.transaction():
+                            await _settle_all_house_annual_income(c2, year)
+                except Exception as exc:
+                    print("CLOCK_SETTLE_ERROR", repr(exc), flush=True)
+
+        asyncio.get_running_loop().create_task(_bg_settle())
     return web.json_response({"ok": True, **clock})
 
 
@@ -4881,8 +4906,8 @@ async def on_startup(app):
     global db_pool
     app["db"] = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=1,
-        max_size=5,
+        min_size=4,
+        max_size=12,
         ssl=(None if os.getenv("DB_SSL","require").strip().lower() in ("disable","off","false","0","no") else "require"),
     )
     db_pool = app["db"]
