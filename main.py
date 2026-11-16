@@ -4906,7 +4906,7 @@ async def on_startup(app):
     global db_pool
     app["db"] = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=4,
+        min_size=1,
         max_size=12,
         ssl=(None if os.getenv("DB_SSL","require").strip().lower() in ("disable","off","false","0","no") else "require"),
     )
