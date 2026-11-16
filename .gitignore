@@ -24,3 +24,7 @@ scan_js.py
 show_break.py
 test_db.py
 static/index.html.*
+pages_dump/
+fix_clock.py
+server.log.old
+*.bak-*
