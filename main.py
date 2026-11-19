@@ -278,7 +278,7 @@ def main_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="ورود به بازی",
-            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107n")
+            web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261119e")
         )]
     ])
     return keyboard
@@ -3857,7 +3857,7 @@ async def mail_send_handler(request):
         notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
                 text="📬 مشاهده نامه‌ها",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107n"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261119e"),
             )
         ]])
         try:
@@ -3977,6 +3977,15 @@ def _house_special_region(house_name):
     return normalized_regions.get(name)
 
 
+WARDEN_INCOME_MULT = 1.2
+_WARDEN_HOUSES = {"استارک", "آرین", "گریجوی", "تالی", "لنیستر", "تارگرین", "بارثیون", "تایرل", "مارتل", "مارتلها"}
+
+
+def _house_is_warden(house_name):
+    name = str(house_name or "").replace("\u200c", "").replace(" ", "")
+    return name in _WARDEN_HOUSES
+
+
 def _settle_house_build_queue(state, now_ms):
     queue = state.get("queue")
     if not isinstance(queue, list) or not queue:
@@ -4065,14 +4074,14 @@ def _settle_food_spoilage(state, now=None):
     return changed
 
 
-def _apply_house_annual_income(state, elapsed, special_region=None):
+def _apply_house_annual_income(state, elapsed, special_region=None, is_warden=False):
     resources = state.setdefault("resources", {})
     special = resources.setdefault("specialGoods", {})
     buildings = state.setdefault("buildings", {})
     standard = [
         ("ماهیگیری", "food", 8), ("مزرعه", "food", 12),
         ("چوب‌بری", "wood", 14), ("معدن سنگ", "stone", 8),
-        ("معدن آهن", "iron", 5), ("بازار", "coins", 500),
+        ("معدن آهن", "iron", 5), ("بازار", "coins", 80),
         ("شهر", "subjects", 3),
     ]
     totals = {}
@@ -4085,25 +4094,21 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
         soldiers = max(0, int(state.get("army", 0) or 0))
     upkeep = ((subjects + 9) // 10 + (soldiers + 9) // 10) * elapsed
     regional_bonus = {
-        "west": {"coins": 1.5},
-        # Riverlands retain their regional fishing advantage without boosting farms.
+        "west": {"coins": 1.3},
         "river": {"fishery": 1.5},
-        "storm": {"wood": 1.5},
-        "vale": {"stone": 1.5},
-        "iron": {"iron": 1.5},
-        "north": {"wood": 1.5},
-        # Dorne's fishery is its signature food source.
+        "reach": {"farm": 1.5},
         "dorne": {"fishery": 2.0},
+        "vale": {"stone": 1.5},
+        "storm": {"wood": 1.5},
+        "iron": {"iron": 1.5},
+        "north": {"subjects": 1.5},
     }.get(special_region, {})
+    warden_mult = WARDEN_INCOME_MULT if is_warden else 1.0
     for name, key, base in standard:
         level = _level(buildings, name)
-        if name == "ماهیگیری":
-            multiplier = regional_bonus.get("fishery", 1.0)
-        elif name == "مزرعه" and special_region == "reach":
-            multiplier = 1.5
-        else:
-            multiplier = regional_bonus.get(key, 1.0)
-        totals[key] = totals.get(key, 0) + int(level * base * multiplier) * elapsed
+        bkey = "fishery" if name == "ماهیگیری" else ("farm" if name == "مزرعه" else key)
+        multiplier = regional_bonus.get(bkey, 1.0) * warden_mult
+        totals[key] = totals.get(key, 0) + int(level * base * multiplier + 1e-6) * elapsed
     special_buildings = [
         ("north", "شکارگاه", "fur", [60,105,165,240,330]),
         ("vale", "دامداری پشمی", "wool", [90,165,255,375,525]),
@@ -4119,7 +4124,7 @@ def _apply_house_annual_income(state, elapsed, special_region=None):
             continue
         level = _level(buildings, name)
         if level:
-            amount = yields[level-1] * elapsed
+            amount = int(yields[level-1] * warden_mult + 1e-6) * elapsed
             if key == "warhorses":
                 resources["warhorses"] = int(resources.get("warhorses", 0) or 0) + amount
             else:
@@ -4336,7 +4341,7 @@ async def _settle_all_house_annual_income(conn, game_year):
             continue
         if elapsed:
             state = _apply_house_annual_income(
-                state, elapsed, _house_special_region(row["name"])
+                state, elapsed, _house_special_region(row["name"]), _house_is_warden(row["name"])
             )
             state["_lastIncomeYear"] = int(game_year)
         resources = state.get("resources") or {}
@@ -4401,7 +4406,7 @@ async def my_house_state_handler(request):
                 elapsed = max(0, year - last_year)
                 if elapsed:
                     state = _apply_house_annual_income(
-                        state, elapsed, _house_special_region(player.get("house_name"))
+                        state, elapsed, _house_special_region(player.get("house_name")), _house_is_warden(player.get("house_name"))
                     )
                     state["_lastIncomeYear"] = year
                     changed = True
@@ -4646,13 +4651,13 @@ async def admin_reset_economy_handler(request):
                 "food": 120, "subjects": 38, "warhorses": 0,
             }
             regional_resource = {
-                "west": ("coins", 1.5),
+                "west": ("coins", 1.3),
                 "reach": ("food", 1.5),
                 "river": ("food", 1.5),
                 "storm": ("wood", 1.5),
                 "vale": ("stone", 1.5),
                 "iron": ("iron", 1.5),
-                "north": ("wood", 1.5),
+                "north": ("subjects", 1.5),
                 "dorne": ("food", 1.5),
             }
             import json
@@ -4886,7 +4891,7 @@ async def index_handler(request):
     # The 1MB shell is gzip-compressed once per file change to keep slow tunnels usable.
     import gzip
     headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Cache-Control": "no-cache, max-age=0, must-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
         "Content-Type": "text/html; charset=utf-8",
@@ -4896,6 +4901,10 @@ async def index_handler(request):
     if _INDEX_GZ_CACHE["mtime"] != mtime:
         raw = WEBAPP_FILE.read_bytes()
         _INDEX_GZ_CACHE.update(mtime=mtime, raw=raw, gz=gzip.compress(raw, 6))
+    etag = '"%s-%s"' % (int(mtime * 1000), len(_INDEX_GZ_CACHE["raw"]))
+    headers["ETag"] = etag
+    if request.headers.get("If-None-Match") == etag:
+        return web.Response(status=304, headers={"ETag": etag, "Cache-Control": headers["Cache-Control"]})
     if "gzip" in request.headers.get("Accept-Encoding", "").lower():
         headers["Content-Encoding"] = "gzip"
         return web.Response(body=_INDEX_GZ_CACHE["gz"], headers=headers)
@@ -5657,7 +5666,7 @@ async def on_startup(app):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
                 text="ورود به بازی",
-                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261107n"),
+                web_app=WebAppInfo(url=f"{WEBHOOK_BASE_URL}/play-v5?build=20261119e"),
             )
         )
     except Exception:
